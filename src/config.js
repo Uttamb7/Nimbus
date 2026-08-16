@@ -11,4 +11,5 @@ export const config = {
   orderUrl: process.env.ORDER_URL,
   inventoryUrl: process.env.INVENTORY_URL,
   eventTargets: process.env.EVENT_TARGETS?.split(",").filter(Boolean) || [],
+  telemetryUrl: process.env.TELEMETRY_URL,
 };

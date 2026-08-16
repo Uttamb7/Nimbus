@@ -13,6 +13,12 @@ curl -X POST http://localhost:8080/checkout -H "content-type: application/json" 
 
 Health check: `http://localhost:8080/health`
 
+GraphQL endpoint: `http://localhost:4000/graphql`
+
+```graphql
+{ serviceGraph { source destination requestCount errorCount averageLatencyMs } }
+```
+
 ## Test
 
 ```bash

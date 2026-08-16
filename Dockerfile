@@ -3,4 +3,4 @@ WORKDIR /app
 COPY package.json ./
 COPY src ./src
 USER node
-CMD ["node", "src/server.js"]
+CMD ["node", "src/main.js"]

@@ -50,5 +50,3 @@ export function start(port = config.port) {
   }));
   return new Promise((resolve) => server.listen(port, () => resolve(server)));
 }
-
-if (process.env.NODE_ENV !== "test") start().then(() => console.log(`${config.name} listening on ${config.port}`));

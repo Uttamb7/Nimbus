@@ -5,6 +5,10 @@ x-service: &service
     PORT: 8080
 
 services:
+  control-plane:
+    <<: *service
+    environment: { SERVICE_NAME: control-plane, PORT: 4000 }
+    ports: ["4000:4000"]
   gateway:
     <<: *service
     environment:
@@ -12,14 +16,15 @@ services:
       PORT: 8080
       IDENTITY_URL: http://identity-api:8080
       ORDER_URL: http://order-orchestrator:8080
+      TELEMETRY_URL: http://control-plane:4000/observe
     ports: ["8080:8080"]
     depends_on: [identity-api, order-orchestrator]
   identity-api:
     <<: *service
-    environment: { SERVICE_NAME: identity-api, PORT: 8080 }
+    environment: { SERVICE_NAME: identity-api, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }
   inventory-api:
     <<: *service
-    environment: { SERVICE_NAME: inventory-api, PORT: 8080 }
+    environment: { SERVICE_NAME: inventory-api, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }
   order-orchestrator:
     <<: *service
     environment:
@@ -27,13 +32,14 @@ services:
       PORT: 8080
       INVENTORY_URL: http://inventory-api:8080
       EVENT_TARGETS: http://payment-worker:8080/events,http://notification-router:8080/events,http://analytics-ingestor:8080/events
+      TELEMETRY_URL: http://control-plane:4000/observe
     depends_on: [inventory-api, payment-worker, notification-router, analytics-ingestor]
   payment-worker:
     <<: *service
-    environment: { SERVICE_NAME: payment-worker, PORT: 8080 }
+    environment: { SERVICE_NAME: payment-worker, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }
   notification-router:
     <<: *service
-    environment: { SERVICE_NAME: notification-router, PORT: 8080 }
+    environment: { SERVICE_NAME: notification-router, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }
   analytics-ingestor:
     <<: *service
-    environment: { SERVICE_NAME: analytics-ingestor, PORT: 8080 }
+    environment: { SERVICE_NAME: analytics-ingestor, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }

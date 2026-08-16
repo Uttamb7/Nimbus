@@ -7,7 +7,9 @@ export async function request(url, options = {}, correlationId = randomUUID()) {
     signal: AbortSignal.timeout(2_000),
     headers: { "content-type": "application/json", "x-correlation-id": correlationId, ...options.headers },
   });
-  console.log(JSON.stringify({ type: "dependency", source: process.env.SERVICE_NAME, destination: new URL(url).hostname, status: response.status, duration_ms: Math.round(performance.now() - started), correlation_id: correlationId }));
+  const observation = { source: process.env.SERVICE_NAME, destination: new URL(url).hostname, protocol: "HTTP", status: response.status, durationMs: performance.now() - started, correlationId };
+  console.log(JSON.stringify({ type: "dependency", ...observation }));
+  if (process.env.TELEMETRY_URL) fetch(process.env.TELEMETRY_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(observation) }).catch(() => {});
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
   return response.json();
 }
