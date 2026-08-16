@@ -4,4 +4,4 @@ Every pull request runs dependency auditing, coverage thresholds, Compose valida
 
 The smoke test starts all eight containers, performs a real checkout, and verifies that the control plane observed the expected dependency edges. Failed integration runs print service logs before cleanup.
 
-Dependabot checks npm, Docker, and GitHub Actions dependencies weekly. Delivery uses GitHub's short-lived token and grants package-write permission only to the delivery job.
+Delivery uses GitHub's short-lived token and grants package-write permission only to the delivery job. Dependency updates are reviewed and committed manually by Uttamb7.
