@@ -1,0 +1,39 @@
+x-service: &service
+  build: .
+  restart: unless-stopped
+  environment:
+    PORT: 8080
+
+services:
+  gateway:
+    <<: *service
+    environment:
+      SERVICE_NAME: gateway
+      PORT: 8080
+      IDENTITY_URL: http://identity-api:8080
+      ORDER_URL: http://order-orchestrator:8080
+    ports: ["8080:8080"]
+    depends_on: [identity-api, order-orchestrator]
+  identity-api:
+    <<: *service
+    environment: { SERVICE_NAME: identity-api, PORT: 8080 }
+  inventory-api:
+    <<: *service
+    environment: { SERVICE_NAME: inventory-api, PORT: 8080 }
+  order-orchestrator:
+    <<: *service
+    environment:
+      SERVICE_NAME: order-orchestrator
+      PORT: 8080
+      INVENTORY_URL: http://inventory-api:8080
+      EVENT_TARGETS: http://payment-worker:8080/events,http://notification-router:8080/events,http://analytics-ingestor:8080/events
+    depends_on: [inventory-api, payment-worker, notification-router, analytics-ingestor]
+  payment-worker:
+    <<: *service
+    environment: { SERVICE_NAME: payment-worker, PORT: 8080 }
+  notification-router:
+    <<: *service
+    environment: { SERVICE_NAME: notification-router, PORT: 8080 }
+  analytics-ingestor:
+    <<: *service
+    environment: { SERVICE_NAME: analytics-ingestor, PORT: 8080 }
