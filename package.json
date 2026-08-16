@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "start": "node src/main.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=70 --test-coverage-branches=65 --test-coverage-functions=70",
+    "test:smoke": "node scripts/smoke.js"
   },
   "dependencies": { "graphql": "^16.11.0" },
   "engines": { "node": ">=22" }

@@ -1,5 +1,7 @@
 # Nimbus Control Panel
 
+[![pipeline](https://github.com/Uttamb7/Nimbus/actions/workflows/ci.yml/badge.svg)](https://github.com/Uttamb7/Nimbus/actions/workflows/ci.yml)
+
 A production-style distributed systems project by Uttam Bhattarai.
 
 Nimbus is being built as a local operations control plane backed by measured behavior from a seven-service commerce workload. It does not claim to run on AWS.
@@ -26,3 +28,5 @@ npm test
 ```
 
 See [architecture](docs/architecture.md) and [failure scenarios](docs/failure-scenarios.md).
+
+The [pipeline](docs/pipeline.md) verifies the distributed flow and delivers a private container image after successful `main` builds.

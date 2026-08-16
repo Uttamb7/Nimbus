@@ -3,6 +3,12 @@ x-service: &service
   restart: unless-stopped
   environment:
     PORT: 8080
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+    interval: 2s
+    timeout: 2s
+    retries: 15
+    start_period: 3s
 
 services:
   control-plane:
