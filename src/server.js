@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
+import { deliver } from "./events.js";
 import { body, request, send } from "./http.js";
 
 const seenEvents = new Set();
@@ -27,7 +28,7 @@ async function route(req, res) {
     const input = await body(req);
     const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);
     const event = { eventId: randomUUID(), correlationId, idempotencyKey: req.headers["idempotency-key"] || randomUUID(), type: "order.created", orderId: randomUUID(), reservationId: reservation.reservationId };
-    setImmediate(() => Promise.allSettled(config.eventTargets.map((target) => request(target, { method: "POST", body: JSON.stringify(event) }, correlationId))));
+    setImmediate(() => Promise.allSettled(config.eventTargets.map((target) => deliver(target, event, correlationId))));
     return send(res, 202, { orderId: event.orderId, status: "accepted" });
   }
 

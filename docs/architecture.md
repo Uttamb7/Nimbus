@@ -12,6 +12,6 @@ gateway -> order-orchestrator -> inventory-api
                            \-> analytics-ingestor
 ```
 
-The current event transport is HTTP with at-least-once intent but no durable retry yet. It must not be described as exactly-once.
+The current event transport is HTTP. Each consumer delivery gets three attempts with short exponential backoff, and final failures produce a structured `event-delivery-failed` log. Retries remain in memory, so a process exit can still lose pending events; delivery is at-least-once, not exactly-once.
 
 The production API uses the standards-compliant `graphql` package. `POST /graphql` currently exposes the service catalog, observed graph, and BFS shortest paths.

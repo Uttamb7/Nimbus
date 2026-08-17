@@ -7,9 +7,9 @@
 - Tradeoff: services share a language and deployment shape.
 - Reason: network behavior stays real without duplicating plumbing.
 
-## HTTP event delivery
+## Retried HTTP event delivery
 
-- Decision: begin with asynchronous HTTP fan-out.
+- Decision: asynchronously fan out over HTTP with three bounded delivery attempts.
 - Alternative: install a message broker immediately.
-- Tradeoff: delivery is not durable yet.
-- Reason: establish observable service boundaries first; add a broker with retries and a DLQ in the event phase.
+- Tradeoff: retries are not durable and exhausted deliveries produce a log rather than a persistent dead-letter queue.
+- Reason: establish measurable retry behavior before adding broker operations and storage.
