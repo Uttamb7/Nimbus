@@ -6,7 +6,7 @@ export class Topology {
     const key = `${source}->${destination}`;
     const edge = this.#edges.get(key) || { source, destination, protocol, requestCount: 0, errorCount: 0, totalLatencyMs: 0 };
     edge.requestCount++;
-    edge.errorCount += status >= 500 ? 1 : 0;
+    edge.errorCount += status === 0 || status >= 500 ? 1 : 0;
     edge.totalLatencyMs += durationMs;
     edge.lastObserved = new Date().toISOString();
     this.#edges.set(key, edge);

@@ -1,15 +1,25 @@
 import { randomUUID } from "node:crypto";
 
-export async function request(url, options = {}, correlationId = randomUUID()) {
-  const started = performance.now();
-  const response = await fetch(url, {
-    ...options,
-    signal: AbortSignal.timeout(2_000),
-    headers: { "content-type": "application/json", "x-correlation-id": correlationId, ...options.headers },
-  });
-  const observation = { source: process.env.SERVICE_NAME, destination: new URL(url).hostname, protocol: "HTTP", status: response.status, durationMs: performance.now() - started, correlationId };
+function report(url, status, started, correlationId) {
+  const observation = { source: process.env.SERVICE_NAME, destination: new URL(url).hostname, protocol: "HTTP", status, durationMs: performance.now() - started, correlationId };
   console.log(JSON.stringify({ type: "dependency", ...observation }));
   if (process.env.TELEMETRY_URL) fetch(process.env.TELEMETRY_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(observation) }).catch(() => {});
+}
+
+export async function request(url, options = {}, correlationId = randomUUID()) {
+  const started = performance.now();
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      signal: AbortSignal.timeout(2_000),
+      headers: { "content-type": "application/json", "x-correlation-id": correlationId, ...options.headers },
+    });
+  } catch (error) {
+    report(url, 0, started, correlationId);
+    throw error;
+  }
+  report(url, response.status, started, correlationId);
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
   return response.json();
 }
