@@ -4,17 +4,24 @@ import { config } from "./config.js";
 import { body, send } from "./http.js";
 import { root, schema } from "./schema.js";
 import { Topology } from "./topology.js";
+import { Operations } from "./operations.js";
 
 export const topology = new Topology();
+export const operations = new Operations();
 
 async function route(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
   if (url.pathname === "/health") return send(response, 200, { service: config.name, status: "healthy" });
-  if (url.pathname === "/observe" && request.method === "POST") return send(response, 202, topology.observe(await body(request)));
+  if (url.pathname === "/observe" && request.method === "POST") {
+    const observation = await body(request);
+    const edge = topology.observe(observation);
+    const incident = operations.observe(observation);
+    return send(response, 202, { edge, incident });
+  }
   if (url.pathname === "/graphql" && request.method === "POST") {
     const { query, variables } = await body(request);
     if (typeof query !== "string" || query.length > 10_000) return send(response, 400, { errors: [{ message: "invalid query" }] });
-    return send(response, 200, await graphql({ schema, source: query, rootValue: root(topology), variableValues: variables }));
+    return send(response, 200, await graphql({ schema, source: query, rootValue: root(topology, operations), variableValues: variables }));
   }
   send(response, 404, { error: "not found" });
 }

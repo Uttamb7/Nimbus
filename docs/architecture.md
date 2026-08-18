@@ -15,3 +15,5 @@ gateway -> order-orchestrator -> inventory-api
 The current event transport is HTTP. Each consumer delivery gets three attempts with short exponential backoff, and final failures produce a structured `event-delivery-failed` log. Retries remain in memory, so a process exit can still lose pending events; delivery is at-least-once, not exactly-once.
 
 The production API uses the standards-compliant `graphql` package. `POST /graphql` currently exposes the service catalog, observed graph, and BFS shortest paths.
+
+The operations engine retains the latest 100 measured outbound calls per service. It calculates request rate, error rate, latency percentiles, availability, SLO compliance, and remaining error budget. Repeated threshold violations create a single active incident and use topology traversal to calculate affected services.

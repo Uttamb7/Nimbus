@@ -11,4 +11,5 @@ test("topology aggregates observations and finds paths", () => {
   assert.equal(topology.edges()[0].requestCount, 2);
   assert.equal(topology.edges()[0].errorCount, 1);
   assert.equal(topology.edges()[0].averageLatencyMs, 20);
+  assert.deepEqual(topology.downstream("gateway"), ["orders", "inventory"]);
 });

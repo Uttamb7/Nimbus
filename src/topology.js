@@ -38,4 +38,20 @@ export class Topology {
     }
     return [];
   }
+
+  downstream(source) {
+    const queue = [source];
+    const seen = new Set([source]);
+    while (queue.length) {
+      const node = queue.shift();
+      for (const edge of this.edges().filter((candidate) => candidate.source === node)) {
+        if (!seen.has(edge.destination)) {
+          seen.add(edge.destination);
+          queue.push(edge.destination);
+        }
+      }
+    }
+    seen.delete(source);
+    return [...seen];
+  }
 }
