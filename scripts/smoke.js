@@ -15,7 +15,7 @@ let edges = [];
 for (let attempt = 0; attempt < 20; attempt++) {
   const response = await fetch("http://127.0.0.1:4000/graphql", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: "Bearer local-viewer" },
     body: JSON.stringify({ query }),
   });
   const result = await response.json();

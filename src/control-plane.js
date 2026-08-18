@@ -8,11 +8,14 @@ import { root, schema } from "./schema.js";
 import { Topology } from "./topology.js";
 import { Operations } from "./operations.js";
 import { Actions } from "./actions.js";
+import { authenticate } from "./auth.js";
+import { inspectQuery, RateLimiter } from "./graphql-guard.js";
 
 export const topology = new Topology();
 export const operations = new Operations();
 export const actions = new Actions(operations);
 const assets = { "/": ["index.html", "text/html; charset=utf-8"], "/app.js": ["app.js", "text/javascript; charset=utf-8"], "/styles.css": ["styles.css", "text/css; charset=utf-8"] };
+const rateLimiter = new RateLimiter();
 
 async function route(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
@@ -30,10 +33,13 @@ async function route(request, response) {
     return send(response, 202, { edge, incident });
   }
   if (url.pathname === "/graphql" && request.method === "POST") {
+    if (!rateLimiter.allow(request.socket.remoteAddress || "unknown")) return send(response, 429, { errors: [{ message: "rate limit exceeded" }] });
+    const identity = authenticate(request.headers.authorization, config.authTokens);
+    if (!identity) return send(response, 401, { errors: [{ message: "authentication required" }] });
     const { query, variables } = await body(request);
     if (typeof query !== "string" || query.length > 10_000) return send(response, 400, { errors: [{ message: "invalid query" }] });
-    const actor = request.headers["x-nimbus-actor"] || "local-operator";
-    return send(response, 200, await graphql({ schema, source: query, rootValue: root(topology, operations, actions, actor), variableValues: variables }));
+    inspectQuery(query);
+    return send(response, 200, await graphql({ schema, source: query, rootValue: root(topology, operations, actions, identity), variableValues: variables }));
   }
   send(response, 404, { error: "not found" });
 }

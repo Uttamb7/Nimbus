@@ -5,7 +5,7 @@ let state = { services:[], serviceGraph:[], incidents:[], auditLog:[], systemHea
 let selected = "gateway";
 
 async function graphql(query, variables) {
-  const response = await fetch(endpoint, { method:"POST", headers:{ "content-type":"application/json", "x-nimbus-actor":"Uttamb7" }, body:JSON.stringify({ query, variables }) });
+  const response = await fetch(endpoint, { method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer local-admin" }, body:JSON.stringify({ query, variables }) });
   const result = await response.json();
   if (result.errors) throw new Error(result.errors[0].message);
   return result.data;

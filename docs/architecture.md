@@ -21,3 +21,5 @@ The operations engine retains the latest 100 measured outbound calls per service
 Local-demo mutations can inject or restore bounded service faults and acknowledge or resolve incidents. Each mutation appends an immutable audit event; fault endpoints require the internal demo token and are inactive unless `DEMO_MODE=true`.
 
 The control plane serves a dependency-free web console on port 4000. Its topology, service metrics, incidents, fault actions, and audit stream all use the same GraphQL API; the current client refreshes every three seconds until subscriptions are added.
+
+GraphQL requires a bearer identity on the backend. Viewers can read state, operators can generate traffic and manage incidents, and admins can inject or restore faults. Requests are limited by source address, query depth, query complexity, and input length. The documented `local-*` credentials exist only in Docker Compose demo mode.

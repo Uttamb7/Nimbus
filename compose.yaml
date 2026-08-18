@@ -17,7 +17,7 @@ x-service: &service
 services:
   control-plane:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: control-plane, PORT: 4000 }
+    environment: { <<: *env, SERVICE_NAME: control-plane, PORT: 4000, AUTH_TOKENS: "local-viewer:viewer:viewer,local-operator:operator:operator,local-admin:admin:Uttamb7" }
     ports: ["4000:4000"]
   gateway:
     <<: *service

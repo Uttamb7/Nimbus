@@ -18,4 +18,5 @@ export const config = {
   faultStatus,
   demoMode: process.env.DEMO_MODE === "true",
   adminToken: process.env.ADMIN_TOKEN,
+  authTokens: process.env.AUTH_TOKENS,
 };

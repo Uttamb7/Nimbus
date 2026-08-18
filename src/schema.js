@@ -1,4 +1,5 @@
 import { buildSchema } from "graphql";
+import { requireRole } from "./auth.js";
 
 export const schema = buildSchema(`
   enum HealthStatus { HEALTHY DEGRADED CRITICAL UNKNOWN }
@@ -16,7 +17,7 @@ export const schema = buildSchema(`
 
 const names = ["gateway", "identity-api", "inventory-api", "order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"];
 
-export function root(topology, operations, actions, actor = "local-operator") {
+export function root(topology, operations, actions, identity = { role: "viewer", actor: "viewer" }) {
   const service = (name) => {
     const metrics = operations.metrics(name);
     return { id: name, name, version: "0.1.0", owner: "Uttam Bhattarai", runtime: "Node.js 22", health: metrics.health, slo: operations.availabilityTarget * 100, metrics };
@@ -36,10 +37,10 @@ export function root(topology, operations, actions, actor = "local-operator") {
       return { ...counts, status: counts.critical ? "CRITICAL" : counts.degraded ? "DEGRADED" : counts.healthy ? "HEALTHY" : "UNKNOWN" };
     },
     auditLog: () => actions?.auditLog() || [],
-    injectFailure: (input) => actions.injectFailure(input, actor),
-    restoreService: (input) => actions.restoreService(input, actor),
-    generateTraffic: (input) => actions.generateTraffic(input, actor),
-    acknowledgeIncident: (input) => actions.acknowledgeIncident(input, actor),
-    resolveIncident: (input) => actions.resolveIncident(input, actor),
+    injectFailure: (input) => { requireRole(identity, "admin"); return actions.injectFailure(input, identity.actor); },
+    restoreService: (input) => { requireRole(identity, "admin"); return actions.restoreService(input, identity.actor); },
+    generateTraffic: (input) => { requireRole(identity, "operator"); return actions.generateTraffic(input, identity.actor); },
+    acknowledgeIncident: (input) => { requireRole(identity, "operator"); return actions.acknowledgeIncident(input, identity.actor); },
+    resolveIncident: (input) => { requireRole(identity, "operator"); return actions.resolveIncident(input, identity.actor); },
   };
 }
