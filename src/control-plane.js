@@ -5,9 +5,11 @@ import { body, send } from "./http.js";
 import { root, schema } from "./schema.js";
 import { Topology } from "./topology.js";
 import { Operations } from "./operations.js";
+import { Actions } from "./actions.js";
 
 export const topology = new Topology();
 export const operations = new Operations();
+export const actions = new Actions(operations);
 
 async function route(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
@@ -21,7 +23,8 @@ async function route(request, response) {
   if (url.pathname === "/graphql" && request.method === "POST") {
     const { query, variables } = await body(request);
     if (typeof query !== "string" || query.length > 10_000) return send(response, 400, { errors: [{ message: "invalid query" }] });
-    return send(response, 200, await graphql({ schema, source: query, rootValue: root(topology, operations), variableValues: variables }));
+    const actor = request.headers["x-nimbus-actor"] || "local-operator";
+    return send(response, 200, await graphql({ schema, source: query, rootValue: root(topology, operations, actions, actor), variableValues: variables }));
   }
   send(response, 404, { error: "not found" });
 }

@@ -16,4 +16,6 @@ export const config = {
   eventTargets: process.env.EVENT_TARGETS?.split(",").filter(Boolean) || [],
   telemetryUrl: process.env.TELEMETRY_URL,
   faultStatus,
+  demoMode: process.env.DEMO_MODE === "true",
+  adminToken: process.env.ADMIN_TOKEN,
 };

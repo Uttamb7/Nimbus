@@ -7,3 +7,7 @@
 3. Send a checkout request.
 4. Observe a `502` from the gateway and dependency errors in the logs while health checks remain green.
 5. Unset `INVENTORY_FAULT_STATUS` to restore inventory.
+
+## Runtime fault
+
+Use GraphQL `injectFailure(service: "order-orchestrator", status: 503, latencyMs: 900, durationSeconds: 90)` in local demo mode. Nimbus records `failure.injected`, applies the fault without restarting containers, and can reverse it with `restoreService`.

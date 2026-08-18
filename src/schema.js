@@ -9,12 +9,14 @@ export const schema = buildSchema(`
   type GraphEdge { source: String!, destination: String!, protocol: String!, requestCount: Int!, errorCount: Int!, averageLatencyMs: Float!, lastObserved: String! }
   type Incident { id: ID!, severity: Severity!, status: IncidentStatus!, title: String!, suspectedService: String!, affectedServices: [String!]!, triggerCondition: String!, createdAt: String!, acknowledgedAt: String, resolvedAt: String }
   type SystemHealth { status: HealthStatus!, healthy: Int!, degraded: Int!, critical: Int!, unknown: Int! }
-  type Query { services: [Service!]!, serviceGraph: [GraphEdge!]!, shortestPath(source: String!, destination: String!): [String!]!, incidents: [Incident!]!, incident(id: ID!): Incident, systemHealth: SystemHealth! }
+  type AuditEvent { id: ID!, timestamp: String!, actor: String!, action: String!, resource: String!, resourceId: String!, metadata: String! }
+  type Query { services: [Service!]!, serviceGraph: [GraphEdge!]!, shortestPath(source: String!, destination: String!): [String!]!, incidents: [Incident!]!, incident(id: ID!): Incident, systemHealth: SystemHealth!, auditLog: [AuditEvent!]! }
+  type Mutation { injectFailure(service: String!, status: Int = 503, latencyMs: Int = 0, durationSeconds: Int = 60): AuditEvent!, restoreService(service: String!): AuditEvent!, acknowledgeIncident(id: ID!): AuditEvent!, resolveIncident(id: ID!): AuditEvent! }
 `);
 
 const names = ["gateway", "identity-api", "inventory-api", "order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"];
 
-export function root(topology, operations) {
+export function root(topology, operations, actions, actor = "local-operator") {
   const service = (name) => {
     const metrics = operations.metrics(name);
     return { id: name, name, version: "0.1.0", owner: "Uttam Bhattarai", runtime: "Node.js 22", health: metrics.health, slo: operations.availabilityTarget * 100, metrics };
@@ -33,5 +35,10 @@ export function root(topology, operations) {
       const counts = names.map((name) => operations.metrics(name).health).reduce((result, health) => ({ ...result, [health.toLowerCase()]: result[health.toLowerCase()] + 1 }), { healthy: 0, degraded: 0, critical: 0, unknown: 0 });
       return { ...counts, status: counts.critical ? "CRITICAL" : counts.degraded ? "DEGRADED" : counts.healthy ? "HEALTHY" : "UNKNOWN" };
     },
+    auditLog: () => actions?.auditLog() || [],
+    injectFailure: (input) => actions.injectFailure(input, actor),
+    restoreService: (input) => actions.restoreService(input, actor),
+    acknowledgeIncident: (input) => actions.acknowledgeIncident(input, actor),
+    resolveIncident: (input) => actions.resolveIncident(input, actor),
   };
 }

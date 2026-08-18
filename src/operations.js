@@ -45,4 +45,20 @@ export class Operations {
   incidents() {
     return this.#incidents.map((incident) => ({ ...incident }));
   }
+
+  acknowledge(id) {
+    const incident = this.#incidents.find((value) => value.id === id);
+    if (!incident || incident.status === "RESOLVED") throw new Error("incident is not active");
+    incident.status = "ACKNOWLEDGED";
+    incident.acknowledgedAt ||= new Date(this.now()).toISOString();
+    return { ...incident };
+  }
+
+  resolve(id) {
+    const incident = this.#incidents.find((value) => value.id === id);
+    if (!incident || incident.status === "RESOLVED") throw new Error("incident is not active");
+    incident.status = "RESOLVED";
+    incident.resolvedAt = new Date(this.now()).toISOString();
+    return { ...incident };
+  }
 }
