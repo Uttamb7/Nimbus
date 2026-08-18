@@ -17,6 +17,8 @@ Health check: `http://localhost:8080/health`
 
 GraphQL endpoint: `http://localhost:4000/graphql`
 
+Operations console: `http://localhost:4000`
+
 ```graphql
 { services { name health metrics { requestRate errorRate p95LatencyMs availability } } incidents { severity title affectedServices } }
 ```

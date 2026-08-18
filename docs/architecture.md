@@ -19,3 +19,5 @@ The production API uses the standards-compliant `graphql` package. `POST /graphq
 The operations engine retains the latest 100 measured outbound calls per service. It calculates request rate, error rate, latency percentiles, availability, SLO compliance, and remaining error budget. Repeated threshold violations create a single active incident and use topology traversal to calculate affected services.
 
 Local-demo mutations can inject or restore bounded service faults and acknowledge or resolve incidents. Each mutation appends an immutable audit event; fault endpoints require the internal demo token and are inactive unless `DEMO_MODE=true`.
+
+The control plane serves a dependency-free web console on port 4000. Its topology, service metrics, incidents, fault actions, and audit stream all use the same GraphQL API; the current client refreshes every three seconds until subscriptions are added.

@@ -11,7 +11,7 @@ export const schema = buildSchema(`
   type SystemHealth { status: HealthStatus!, healthy: Int!, degraded: Int!, critical: Int!, unknown: Int! }
   type AuditEvent { id: ID!, timestamp: String!, actor: String!, action: String!, resource: String!, resourceId: String!, metadata: String! }
   type Query { services: [Service!]!, serviceGraph: [GraphEdge!]!, shortestPath(source: String!, destination: String!): [String!]!, incidents: [Incident!]!, incident(id: ID!): Incident, systemHealth: SystemHealth!, auditLog: [AuditEvent!]! }
-  type Mutation { injectFailure(service: String!, status: Int = 503, latencyMs: Int = 0, durationSeconds: Int = 60): AuditEvent!, restoreService(service: String!): AuditEvent!, acknowledgeIncident(id: ID!): AuditEvent!, resolveIncident(id: ID!): AuditEvent! }
+  type Mutation { injectFailure(service: String!, status: Int = 503, latencyMs: Int = 0, durationSeconds: Int = 60): AuditEvent!, restoreService(service: String!): AuditEvent!, generateTraffic(count: Int = 1): AuditEvent!, acknowledgeIncident(id: ID!): AuditEvent!, resolveIncident(id: ID!): AuditEvent! }
 `);
 
 const names = ["gateway", "identity-api", "inventory-api", "order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"];
@@ -38,6 +38,7 @@ export function root(topology, operations, actions, actor = "local-operator") {
     auditLog: () => actions?.auditLog() || [],
     injectFailure: (input) => actions.injectFailure(input, actor),
     restoreService: (input) => actions.restoreService(input, actor),
+    generateTraffic: (input) => actions.generateTraffic(input, actor),
     acknowledgeIncident: (input) => actions.acknowledgeIncident(input, actor),
     resolveIncident: (input) => actions.resolveIncident(input, actor),
   };

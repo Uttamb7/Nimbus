@@ -3,5 +3,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY src ./src
+COPY web ./web
 USER node
 CMD ["node", "src/main.js"]

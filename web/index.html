@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#080b10">
+  <title>Nimbus Control Panel</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mark">N</span><div><strong>NIMBUS</strong><small>CONTROL PLANE</small></div></div>
+    <div class="environment"><span class="pulse"></span> LOCAL DEMO <span class="divider"></span> us-east-1</div>
+    <div class="sync"><span id="sync-state">CONNECTING</span><time id="clock"></time></div>
+  </header>
+
+  <main>
+    <section class="page-head">
+      <div><p class="eyebrow">OPERATIONS / SYSTEM OVERVIEW</p><h1>Distributed system status</h1><p class="lede">Observed traffic, dependency health, and operator controls from the running commerce workload.</p></div>
+      <div class="actions"><button id="generate" class="primary">Generate 5 checkouts</button><button id="refresh">Refresh</button></div>
+    </section>
+
+    <section class="summary" aria-label="System summary">
+      <article><span>SYSTEM</span><strong id="system-status" class="status unknown">UNKNOWN</strong><small id="service-summary">0 services observed</small></article>
+      <article><span>REQUESTS</span><strong id="request-count">0</strong><small>rolling sample</small></article>
+      <article><span>ERROR RATE</span><strong id="error-rate">0.00%</strong><small>measured outbound calls</small></article>
+      <article><span>P95 LATENCY</span><strong id="p95">0 ms</strong><small>slowest service</small></article>
+      <article><span>ACTIVE INCIDENTS</span><strong id="incident-count">0</strong><small>automatic detection</small></article>
+    </section>
+
+    <section class="workspace">
+      <article class="panel topology-panel">
+        <header><div><p class="eyebrow">LIVE TOPOLOGY</p><h2>Service dependencies</h2></div><label class="toggle"><input id="blast-mode" type="checkbox"><span></span> Blast radius</label></header>
+        <div class="legend"><i class="healthy"></i>Healthy <i class="degraded"></i>Degraded <i class="critical"></i>Critical <i class="unknown"></i>Unknown</div>
+        <svg id="topology" viewBox="0 0 820 430" role="img" aria-label="Observed service dependency topology"></svg>
+      </article>
+
+      <aside class="panel detail-panel">
+        <header><div><p class="eyebrow">SERVICE INSPECTOR</p><h2 id="detail-name">Select a service</h2></div><span id="detail-health" class="status unknown">UNKNOWN</span></header>
+        <div id="service-detail" class="empty">Choose a topology node or service row to inspect measured health and dependencies.</div>
+        <form id="fault-form" class="fault-form">
+          <h3>Local fault control</h3>
+          <label>Service<select id="fault-service"></select></label>
+          <div class="form-row"><label>Status<input id="fault-status" type="number" min="500" max="599" value="503"></label><label>Latency ms<input id="fault-latency" type="number" min="0" max="5000" value="900"></label></div>
+          <label>Duration seconds<input id="fault-duration" type="number" min="1" max="300" value="60"></label>
+          <div class="form-row"><button class="danger" type="submit">Inject fault</button><button id="restore" type="button">Restore</button></div>
+        </form>
+      </aside>
+    </section>
+
+    <section class="panel services-panel">
+      <header><div><p class="eyebrow">SERVICE CATALOG</p><h2>Runtime health</h2></div><span class="meta">ROLLING 100 REQUESTS</span></header>
+      <div class="table-wrap"><table><thead><tr><th>Service</th><th>State</th><th>Requests</th><th>Rate</th><th>Errors</th><th>P50</th><th>P95</th><th>P99</th><th>SLO</th><th>Budget</th></tr></thead><tbody id="services"></tbody></table></div>
+    </section>
+
+    <section class="lower-grid">
+      <article class="panel">
+        <header><div><p class="eyebrow">INCIDENT ENGINE</p><h2>Incident queue</h2></div><span id="incident-badge" class="count">0</span></header>
+        <div id="incidents" class="feed empty">No incidents detected.</div>
+      </article>
+      <article class="panel">
+        <header><div><p class="eyebrow">IMMUTABLE HISTORY</p><h2>Audit stream</h2></div><span class="meta">LATEST FIRST</span></header>
+        <div id="audit" class="feed empty">No operator actions recorded.</div>
+      </article>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

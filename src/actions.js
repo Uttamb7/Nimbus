@@ -32,6 +32,13 @@ export class Actions {
     return this.record(actor, "failure.restored", "service", service);
   }
 
+  async generateTraffic({ count = 1 }, actor) {
+    if (!Number.isInteger(count) || count < 1 || count > 20) throw new Error("count must be 1-20");
+    const requests = Array.from({ length: count }, (_, index) => this.request("http://gateway:8080/checkout", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": `demo-${Date.now()}-${index}` }, body: JSON.stringify({ sku: "nimbus-demo", quantity: 1 }) }));
+    const results = await Promise.allSettled(requests);
+    return this.record(actor, "traffic.generated", "system", "demo", { count, succeeded: results.filter((result) => result.status === "fulfilled" && result.value.ok).length });
+  }
+
   acknowledgeIncident({ id }, actor) {
     this.operations.acknowledge(id);
     return this.record(actor, "incident.acknowledged", "incident", id);
