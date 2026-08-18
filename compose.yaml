@@ -23,14 +23,15 @@ services:
       IDENTITY_URL: http://identity-api:8080
       ORDER_URL: http://order-orchestrator:8080
       TELEMETRY_URL: http://control-plane:4000/observe
+      FAULT_STATUS: ${GATEWAY_FAULT_STATUS:-}
     ports: ["8080:8080"]
     depends_on: [identity-api, order-orchestrator]
   identity-api:
     <<: *service
-    environment: { SERVICE_NAME: identity-api, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }
+    environment: { SERVICE_NAME: identity-api, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${IDENTITY_FAULT_STATUS:-}" }
   inventory-api:
     <<: *service
-    environment: { SERVICE_NAME: inventory-api, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }
+    environment: { SERVICE_NAME: inventory-api, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${INVENTORY_FAULT_STATUS:-}" }
   order-orchestrator:
     <<: *service
     environment:
@@ -39,13 +40,14 @@ services:
       INVENTORY_URL: http://inventory-api:8080
       EVENT_TARGETS: http://payment-worker:8080/events,http://notification-router:8080/events,http://analytics-ingestor:8080/events
       TELEMETRY_URL: http://control-plane:4000/observe
+      FAULT_STATUS: ${ORDER_FAULT_STATUS:-}
     depends_on: [inventory-api, payment-worker, notification-router, analytics-ingestor]
   payment-worker:
     <<: *service
-    environment: { SERVICE_NAME: payment-worker, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }
+    environment: { SERVICE_NAME: payment-worker, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${PAYMENT_FAULT_STATUS:-}" }
   notification-router:
     <<: *service
-    environment: { SERVICE_NAME: notification-router, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }
+    environment: { SERVICE_NAME: notification-router, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${NOTIFICATION_FAULT_STATUS:-}" }
   analytics-ingestor:
     <<: *service
-    environment: { SERVICE_NAME: analytics-ingestor, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe }
+    environment: { SERVICE_NAME: analytics-ingestor, PORT: 8080, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${ANALYTICS_FAULT_STATUS:-}" }

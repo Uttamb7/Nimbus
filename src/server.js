@@ -12,6 +12,7 @@ async function route(req, res) {
   res.setHeader("x-correlation-id", correlationId);
 
   if (url.pathname === "/health") return send(res, 200, { service: config.name, status: "healthy" });
+  if (config.faultStatus) return send(res, config.faultStatus, { error: "injected fault" });
   if (config.name === "identity-api" && url.pathname === "/users/me") return send(res, 200, { id: "demo-user", active: true });
   if (config.name === "inventory-api" && url.pathname === "/reserve" && req.method === "POST") return send(res, 200, { reservationId: randomUUID() });
 
