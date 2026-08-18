@@ -28,7 +28,9 @@ Use only as many criteria as the work needs. A one-point correction may need two
 
 ## Docs
 
-Name the exact user, architecture, operational, or design documentation that changes. If the work has no documentation impact, write `No documentation change required` and briefly explain why.
+Documentation is exception-based, not a default task. Update it only when key architecture, operations, security boundaries, or user-facing behavior materially changes. Do not update documentation for every issue.
+
+When essential documentation is affected, name the exact information that changes. Otherwise write `No documentation change required` and briefly explain why.
 
 ## State and evidence
 
