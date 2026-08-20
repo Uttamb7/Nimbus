@@ -7,12 +7,12 @@
 - Tradeoff: services share a language and deployment shape.
 - Reason: network behavior stays real without duplicating plumbing.
 
-## Retried HTTP event delivery
+## Transactional HTTP outbox
 
-- Decision: asynchronously fan out over HTTP with three bounded delivery attempts.
-- Alternative: install a message broker immediately.
-- Tradeoff: retries are not durable and exhausted deliveries produce a log rather than a persistent dead-letter queue.
-- Reason: establish measurable retry behavior before adding broker operations and storage.
+- Decision: commit orders and event envelopes together, then asynchronously fan out claimed outbox rows over HTTP.
+- Alternative: couple order acceptance to synchronous consumer calls or wait to add persistence with the broker.
+- Tradeoff: producer retries survive restart, but HTTP fanout can redeliver to already successful consumers and consumer receipts are not yet durable.
+- Reason: establish the transaction boundary and reusable outbox lifecycle before replacing HTTP with broker acknowledgements.
 
 ## PostgreSQL operational history
 

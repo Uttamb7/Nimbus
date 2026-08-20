@@ -2,13 +2,14 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { setTimeout as wait } from "node:timers/promises";
 import { config } from "./config.js";
-import { deliver } from "./events.js";
+import { EventStore } from "./event-store.js";
+import { deliver, orderCreated, OutboxPublisher } from "./events.js";
 import { body, request, send } from "./http.js";
 
 const seenEvents = new Set();
 let fault = { status: config.faultStatus, latencyMs: 0, expiresAt: Infinity };
 
-async function route(req, res) {
+async function route(req, res, eventStore) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const correlationId = req.headers["x-correlation-id"] || randomUUID();
   res.setHeader("x-correlation-id", correlationId);
@@ -44,8 +45,9 @@ async function route(req, res) {
   if (config.name === "order-orchestrator" && url.pathname === "/orders" && req.method === "POST") {
     const input = await body(req);
     const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);
-    const event = { eventId: randomUUID(), correlationId, idempotencyKey: req.headers["idempotency-key"] || randomUUID(), type: "order.created", orderId: randomUUID(), reservationId: reservation.reservationId };
-    setImmediate(() => Promise.allSettled(config.eventTargets.map((target) => deliver(target, event, correlationId))));
+    const event = orderCreated({ correlationId, idempotencyKey: req.headers["idempotency-key"] || randomUUID(), orderId: randomUUID(), reservationId: reservation.reservationId });
+    if (eventStore) await eventStore.createOrder(event);
+    else setImmediate(() => Promise.allSettled(config.eventTargets.map((target) => deliver(target, event, correlationId))));
     return send(res, 202, { orderId: event.orderId, status: "accepted" });
   }
 
@@ -60,11 +62,26 @@ async function route(req, res) {
   send(res, 404, { error: "not found" });
 }
 
-export function start(port = config.port) {
-  const server = createServer((req, res) => route(req, res).catch((error) => {
+export async function start(port = config.port, dependencies = {}) {
+  let eventStore = dependencies.eventStore;
+  let publisher = dependencies.publisher;
+  const ownsStore = config.name === "order-orchestrator" && config.databaseUrl && !eventStore;
+  if (ownsStore) {
+    eventStore = new EventStore({ connectionString: config.databaseUrl });
+    await eventStore.migrate();
+  }
+  if (eventStore && !publisher) publisher = new OutboxPublisher({ store: eventStore, targets: config.eventTargets });
+
+  const server = createServer((req, res) => route(req, res, eventStore).catch((error) => {
     console.error(JSON.stringify({ type: "error", service: config.name, message: error.message }));
     if (!res.headersSent) send(res, 502, { error: "dependency failure", correlationId: req.headers["x-correlation-id"] });
     else res.end();
   }));
-  return new Promise((resolve) => server.listen(port, () => resolve(server)));
+  await new Promise((resolve) => server.listen(port, resolve));
+  publisher?.start();
+  server.on("close", async () => {
+    await publisher?.stop();
+    if (ownsStore) await eventStore.close();
+  });
+  return server;
 }

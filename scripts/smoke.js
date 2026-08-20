@@ -22,6 +22,14 @@ const order = await checkout.json();
 assert.ok(order.orderId);
 assert.ok(order.correlationId);
 
+let outbox = "";
+for (let attempt = 0; attempt < 20; attempt++) {
+  outbox = execFileSync("docker", ["compose", "exec", "-T", "postgres", "psql", "-U", "nimbus", "-d", "nimbus", "-Atc", `SELECT status || '|' || event->>'type' || '|' || event->>'version' FROM outbox_events WHERE aggregate_id = '${order.orderId}'`], { encoding: "utf8" }).trim();
+  if (outbox.startsWith("PUBLISHED|")) break;
+  await new Promise((resolve) => setTimeout(resolve, 250));
+}
+assert.equal(outbox, "PUBLISHED|order.created|1");
+
 const query = "{ serviceGraph { source destination requestCount errorCount averageLatencyMs } }";
 let edges = [];
 for (let attempt = 0; attempt < 20; attempt++) {
@@ -65,4 +73,4 @@ const persisted = await graphql("{ incidents { id status createdAt acknowledgedA
 assert.ok(persisted.incidents.some((value) => value.id === incident.id && value.status === "RESOLVED" && value.createdAt === incident.createdAt && value.acknowledgedAt && value.resolvedAt));
 assert.ok(persisted.auditLog.some((value) => value.action === "incident.acknowledged" && value.resourceId === incident.id));
 assert.ok(persisted.auditLog.some((value) => value.action === "incident.resolved" && value.resourceId === incident.id));
-console.log(`checkout ${order.orderId}: ${edges.length} observed edges; incident ${incident.id} survived restart`);
+console.log(`checkout ${order.orderId}: durable event published; ${edges.length} observed edges; incident ${incident.id} survived restart`);

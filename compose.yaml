@@ -59,8 +59,14 @@ services:
       INVENTORY_URL: http://inventory-api:8080
       EVENT_TARGETS: http://payment-worker:8080/events,http://notification-router:8080/events,http://analytics-ingestor:8080/events
       TELEMETRY_URL: http://control-plane:4000/observe
+      DATABASE_URL: postgresql://nimbus:nimbus-local@postgres:5432/nimbus
       FAULT_STATUS: ${ORDER_FAULT_STATUS:-}
-    depends_on: [inventory-api, payment-worker, notification-router, analytics-ingestor]
+    depends_on:
+      postgres: { condition: service_healthy }
+      inventory-api: { condition: service_started }
+      payment-worker: { condition: service_started }
+      notification-router: { condition: service_started }
+      analytics-ingestor: { condition: service_started }
   payment-worker:
     <<: *service
     environment: { <<: *env, SERVICE_NAME: payment-worker, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${PAYMENT_FAULT_STATUS:-}" }

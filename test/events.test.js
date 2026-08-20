@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deliver } from "../src/events.js";
+import { deliver, orderCreated, OutboxPublisher } from "../src/events.js";
 
 test("event delivery retries transient and permanent failures", async (t) => {
   let attempts = 0;
@@ -23,7 +23,7 @@ test("event delivery retries transient and permanent failures", async (t) => {
 
   attempts = 0;
   permanent = true;
-  await deliver("http://payment-worker:8080/events", event, "correlation-1");
+  await assert.rejects(deliver("http://payment-worker:8080/events", event, "correlation-1"), /offline/);
   assert.equal(attempts, 3);
   assert.deepEqual(failures[0], {
     type: "event-delivery-failed",
@@ -34,4 +34,53 @@ test("event delivery retries transient and permanent failures", async (t) => {
     attempts: 3,
     message: "offline",
   });
+});
+
+test("order event envelope carries durable delivery identifiers", () => {
+  const event = orderCreated(
+    { correlationId: "correlation-1", idempotencyKey: "checkout-1", orderId: "order-1", reservationId: "reservation-1" },
+    () => "2026-08-20T12:00:00.000Z",
+    () => "event-1",
+  );
+  assert.deepEqual(event, {
+    eventId: "event-1",
+    correlationId: "correlation-1",
+    idempotencyKey: "checkout-1",
+    type: "order.created",
+    version: 1,
+    createdAt: "2026-08-20T12:00:00.000Z",
+    orderId: "order-1",
+    reservationId: "reservation-1",
+  });
+});
+
+test("outbox publisher records retry state and publishes only after every target acknowledges", async () => {
+  const event = { eventId: "event-1", correlationId: "correlation-1" };
+  const claimed = [{ event, attemptCount: 1 }, { event, attemptCount: 2 }, { event, attemptCount: 5 }];
+  const calls = [];
+  const store = {
+    claim: async () => claimed.shift() || null,
+    markPublished: async (id) => calls.push(["published", id]),
+    retry: async (...args) => calls.push(["retry", ...args]),
+    deadLetter: async (...args) => calls.push(["dead", ...args]),
+  };
+  let fail = true;
+  const publisher = new OutboxPublisher({
+    store,
+    targets: ["payment", "analytics"],
+    random: () => 0.5,
+    deliverEvent: async (target) => {
+      calls.push(["deliver", target]);
+      if (fail && target === "analytics") throw new Error("offline");
+    },
+  });
+
+  await publisher.runOnce();
+  assert.deepEqual(calls.at(-1), ["retry", "event-1", 375, "offline"]);
+  fail = false;
+  await publisher.runOnce();
+  assert.deepEqual(calls.at(-1), ["published", "event-1"]);
+  fail = true;
+  await publisher.runOnce();
+  assert.deepEqual(calls.at(-1), ["dead", "event-1", "offline"]);
 });
