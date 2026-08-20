@@ -17,8 +17,21 @@ x-service: &service
 services:
   control-plane:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: control-plane, PORT: 4000, AUTH_TOKENS: "local-viewer:viewer:viewer,local-operator:operator:operator,local-admin:admin:Uttamb7" }
+    environment: { <<: *env, SERVICE_NAME: control-plane, PORT: 4000, AUTH_TOKENS: "local-viewer:viewer:viewer,local-operator:operator:operator,local-admin:admin:Uttamb7", DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus" }
     ports: ["4000:4000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment: { POSTGRES_DB: nimbus, POSTGRES_USER: nimbus, POSTGRES_PASSWORD: nimbus-local }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nimbus -d nimbus"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
+    volumes: [nimbus-postgres:/var/lib/postgresql/data]
   gateway:
     <<: *service
     environment:
@@ -57,3 +70,6 @@ services:
   analytics-ingestor:
     <<: *service
     environment: { <<: *env, SERVICE_NAME: analytics-ingestor, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${ANALYTICS_FAULT_STATUS:-}" }
+
+volumes:
+  nimbus-postgres:

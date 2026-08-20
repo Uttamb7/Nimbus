@@ -10,9 +10,11 @@ import { Operations } from "./operations.js";
 import { Actions } from "./actions.js";
 import { authenticate } from "./auth.js";
 import { inspectQuery, RateLimiter } from "./graphql-guard.js";
+import { History } from "./history.js";
 
 export const topology = new Topology();
-export const operations = new Operations();
+export const history = new History({ connectionString: config.databaseUrl });
+export const operations = new Operations({ history });
 export const actions = new Actions(operations);
 const assets = { "/": ["index.html", "text/html; charset=utf-8"], "/app.js": ["app.js", "text/javascript; charset=utf-8"], "/styles.css": ["styles.css", "text/css; charset=utf-8"] };
 const rateLimiter = new RateLimiter();
@@ -29,7 +31,7 @@ async function route(request, response) {
   if (url.pathname === "/observe" && request.method === "POST") {
     const observation = await body(request);
     const edge = topology.observe(observation);
-    const incident = operations.observe(observation);
+    const incident = await operations.observe(observation);
     return send(response, 202, { edge, incident });
   }
   if (url.pathname === "/graphql" && request.method === "POST") {
@@ -44,7 +46,8 @@ async function route(request, response) {
   send(response, 404, { error: "not found" });
 }
 
-export function start(port = config.port) {
+export async function start(port = config.port) {
+  await history.migrate();
   const server = createServer((request, response) => route(request, response).catch((error) => send(response, 400, { errors: [{ message: error.message }] })));
   return new Promise((resolve) => server.listen(port, () => resolve(server)));
 }

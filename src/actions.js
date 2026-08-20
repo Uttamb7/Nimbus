@@ -3,18 +3,17 @@ import { randomUUID } from "node:crypto";
 const services = new Set(["gateway", "identity-api", "inventory-api", "order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"]);
 
 export class Actions {
-  #audit = [];
-
   constructor(operations, { adminToken = process.env.ADMIN_TOKEN, request = fetch, now = () => new Date().toISOString() } = {}) {
     this.operations = operations;
+    this.history = operations.history;
     this.adminToken = adminToken;
     this.request = request;
     this.now = now;
   }
 
-  record(actor, action, resource, resourceId, metadata = {}) {
+  async record(actor, action, resource, resourceId, metadata = {}) {
     const event = Object.freeze({ id: randomUUID(), timestamp: this.now(), actor, action, resource, resourceId, metadata: JSON.stringify(metadata) });
-    this.#audit.unshift(event);
+    await this.history.appendAudit(event);
     return event;
   }
 
@@ -39,17 +38,17 @@ export class Actions {
     return this.record(actor, "traffic.generated", "system", "demo", { count, succeeded: results.filter((result) => result.status === "fulfilled" && result.value.ok).length });
   }
 
-  acknowledgeIncident({ id }, actor) {
-    this.operations.acknowledge(id);
+  async acknowledgeIncident({ id }, actor) {
+    await this.operations.acknowledge(id);
     return this.record(actor, "incident.acknowledged", "incident", id);
   }
 
-  resolveIncident({ id }, actor) {
-    this.operations.resolve(id);
+  async resolveIncident({ id }, actor) {
+    await this.operations.resolve(id);
     return this.record(actor, "incident.resolved", "incident", id);
   }
 
   auditLog() {
-    return this.#audit.map((event) => ({ ...event }));
+    return this.history.auditLog();
   }
 }

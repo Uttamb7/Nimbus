@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { History } from "./history.js";
 
 const percentile = (values, fraction) => values.length ? values[Math.max(0, Math.ceil(values.length * fraction) - 1)] : 0;
 
 export class Operations {
   #samples = new Map();
   #violations = new Map();
-  #incidents = [];
 
-  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, now = () => Date.now() } = {}) {
-    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, now });
+  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, now = () => Date.now(), history = new History() } = {}) {
+    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, now, history });
   }
 
   observe(observation) {
@@ -21,11 +21,10 @@ export class Operations {
     const violated = metrics.requestCount >= this.minSamples && (metrics.p95LatencyMs > this.p95LimitMs || metrics.errorRate > this.errorRateLimit);
     const count = violated ? (this.#violations.get(observation.source) || 0) + 1 : 0;
     this.#violations.set(observation.source, count);
-    if (count >= this.consecutiveWindows && !this.#incidents.some((incident) => incident.suspectedService === observation.source && incident.status !== "RESOLVED")) {
+    if (count >= this.consecutiveWindows) {
       const reason = metrics.p95LatencyMs > this.p95LimitMs ? `p95 latency exceeded ${this.p95LimitMs} ms` : `error rate exceeded ${this.errorRateLimit * 100}%`;
       const incident = { id: randomUUID(), severity: "SEV2", status: "OPEN", title: `${observation.source} is unhealthy`, suspectedService: observation.source, triggerCondition: reason, createdAt: new Date(this.now()).toISOString(), acknowledgedAt: null, resolvedAt: null };
-      this.#incidents.unshift(incident);
-      return incident;
+      return this.history.createIncident(incident);
     }
   }
 
@@ -43,22 +42,18 @@ export class Operations {
   }
 
   incidents() {
-    return this.#incidents.map((incident) => ({ ...incident }));
+    return this.history.incidents();
   }
 
-  acknowledge(id) {
-    const incident = this.#incidents.find((value) => value.id === id);
-    if (!incident || incident.status === "RESOLVED") throw new Error("incident is not active");
-    incident.status = "ACKNOWLEDGED";
-    incident.acknowledgedAt ||= new Date(this.now()).toISOString();
-    return { ...incident };
+  async acknowledge(id) {
+    const incident = await this.history.updateIncident(id, "ACKNOWLEDGED", new Date(this.now()).toISOString());
+    if (!incident) throw new Error("incident is not active");
+    return incident;
   }
 
-  resolve(id) {
-    const incident = this.#incidents.find((value) => value.id === id);
-    if (!incident || incident.status === "RESOLVED") throw new Error("incident is not active");
-    incident.status = "RESOLVED";
-    incident.resolvedAt = new Date(this.now()).toISOString();
-    return { ...incident };
+  async resolve(id) {
+    const incident = await this.history.updateIncident(id, "RESOLVED", new Date(this.now()).toISOString());
+    if (!incident) throw new Error("incident is not active");
+    return incident;
   }
 }

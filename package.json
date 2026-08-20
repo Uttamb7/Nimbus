@@ -9,6 +9,11 @@
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=70 --test-coverage-branches=65 --test-coverage-functions=70",
     "test:smoke": "node scripts/smoke.js"
   },
-  "dependencies": { "graphql": "^16.11.0" },
-  "engines": { "node": ">=22" }
+  "dependencies": {
+    "graphql": "^16.11.0",
+    "pg": "^8.23.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

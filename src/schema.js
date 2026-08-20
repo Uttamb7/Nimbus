@@ -27,9 +27,9 @@ export function root(topology, operations, actions, identity = { role: "viewer",
     services: () => names.map(service),
     serviceGraph: () => topology.edges(),
     shortestPath: ({ source, destination }) => topology.shortestPath(source, destination),
-    incidents: () => operations.incidents().map(incident),
-    incident: ({ id }) => {
-      const found = operations.incidents().find((value) => value.id === id);
+    incidents: async () => (await operations.incidents()).map(incident),
+    incident: async ({ id }) => {
+      const found = (await operations.incidents()).find((value) => value.id === id);
       return found && incident(found);
     },
     systemHealth: () => {
