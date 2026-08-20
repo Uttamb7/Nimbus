@@ -24,7 +24,7 @@ assert.ok(order.correlationId);
 
 let outbox = "";
 for (let attempt = 0; attempt < 20; attempt++) {
-  outbox = execFileSync("docker", ["compose", "exec", "-T", "postgres", "psql", "-U", "nimbus", "-d", "nimbus", "-Atc", `SELECT status || '|' || event->>'type' || '|' || event->>'version' FROM outbox_events WHERE aggregate_id = '${order.orderId}'`], { encoding: "utf8" }).trim();
+  outbox = execFileSync("docker", ["compose", "exec", "-T", "postgres", "psql", "-U", "nimbus", "-d", "nimbus", "-Atc", `SELECT status || '|' || (event->>'type') || '|' || (event->>'version') FROM outbox_events WHERE aggregate_id = '${order.orderId}'`], { encoding: "utf8" }).trim();
   if (outbox.startsWith("PUBLISHED|")) break;
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
