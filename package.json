@@ -10,6 +10,7 @@
     "test:smoke": "node scripts/smoke.js"
   },
   "dependencies": {
+    "amqplib": "^2.0.1",
     "graphql": "^16.11.0",
     "pg": "^8.23.0"
   },

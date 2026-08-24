@@ -1,13 +1,22 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { setTimeout as wait } from "node:timers/promises";
+import { BrokerConsumer, BrokerPublisher, consumers } from "./broker.js";
 import { config } from "./config.js";
 import { EventStore } from "./event-store.js";
-import { deliver, orderCreated, OutboxPublisher } from "./events.js";
+import { orderCreated, OutboxPublisher } from "./events.js";
 import { body, request, send } from "./http.js";
 
 const seenEvents = new Set();
 let fault = { status: config.faultStatus, latencyMs: 0, expiresAt: Infinity };
+
+async function processEvent(event, eventStore) {
+  const firstDelivery = eventStore ? await eventStore.recordConsumerEvent(config.name, event.eventId) : !seenEvents.has(event.eventId);
+  if (!firstDelivery) return false;
+  if (!eventStore) seenEvents.add(event.eventId);
+  console.log(JSON.stringify({ type: "event", service: config.name, event_id: event.eventId, correlation_id: event.correlationId }));
+  return true;
+}
 
 async function route(req, res, eventStore) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -47,17 +56,13 @@ async function route(req, res, eventStore) {
     const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);
     const event = orderCreated({ correlationId, idempotencyKey: req.headers["idempotency-key"] || randomUUID(), orderId: randomUUID(), reservationId: reservation.reservationId });
     if (eventStore) await eventStore.createOrder(event);
-    else setImmediate(() => Promise.allSettled(config.eventTargets.map((target) => deliver(target, event, correlationId))));
     return send(res, 202, { orderId: event.orderId, status: "accepted" });
   }
 
   if (url.pathname === "/events" && req.method === "POST") {
     const event = await body(req);
-    const firstDelivery = eventStore ? await eventStore.recordConsumerEvent(config.name, event.eventId) : !seenEvents.has(event.eventId);
-    if (!firstDelivery) return send(res, 200, { duplicate: true });
-    if (!eventStore) seenEvents.add(event.eventId);
-    console.log(JSON.stringify({ type: "event", service: config.name, event_id: event.eventId, correlation_id: event.correlationId }));
-    return send(res, 202, { accepted: true });
+    const accepted = await processEvent(event, eventStore);
+    return send(res, accepted ? 202 : 200, { [accepted ? "accepted" : "duplicate"]: true });
   }
 
   send(res, 404, { error: "not found" });
@@ -66,12 +71,18 @@ async function route(req, res, eventStore) {
 export async function start(port = config.port, dependencies = {}) {
   let eventStore = dependencies.eventStore;
   let publisher = dependencies.publisher;
+  let brokerPublisher = dependencies.brokerPublisher;
+  let consumer = dependencies.consumer;
   const ownsStore = config.databaseUrl && !eventStore;
   if (ownsStore) {
     eventStore = new EventStore({ connectionString: config.databaseUrl });
     await eventStore.migrate();
   }
-  if (config.name === "order-orchestrator" && eventStore && !publisher) publisher = new OutboxPublisher({ store: eventStore, targets: config.eventTargets });
+  if (config.name === "order-orchestrator" && eventStore && config.brokerUrl && !publisher) {
+    brokerPublisher ||= new BrokerPublisher({ url: config.brokerUrl });
+    publisher = new OutboxPublisher({ store: eventStore, publishEvent: (event) => brokerPublisher.publish(event) });
+  }
+  if (consumers.includes(config.name) && eventStore && config.brokerUrl && !consumer) consumer = new BrokerConsumer({ url: config.brokerUrl, name: config.name, handler: (event) => processEvent(event, eventStore) });
 
   const server = createServer((req, res) => route(req, res, eventStore).catch((error) => {
     console.error(JSON.stringify({ type: "error", service: config.name, message: error.message }));
@@ -80,8 +91,11 @@ export async function start(port = config.port, dependencies = {}) {
   }));
   await new Promise((resolve) => server.listen(port, resolve));
   publisher?.start();
+  consumer?.start();
   server.on("close", async () => {
+    await consumer?.stop();
     await publisher?.stop();
+    await brokerPublisher?.close();
     if (ownsStore) await eventStore.close();
   });
   return server;

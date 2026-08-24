@@ -7,12 +7,12 @@ Every outbound call reports its measured status and duration to the control plan
 ```text
 gateway -> identity-api
 gateway -> order-orchestrator -> inventory-api
-                           \-> payment-worker
-                           \-> notification-router
-                           \-> analytics-ingestor
+                           \-> PostgreSQL outbox -> RabbitMQ -> payment-worker
+                                                              -> notification-router
+                                                              -> analytics-ingestor
 ```
 
-The current event transport remains HTTP, but order creation and its `order.created` envelope commit together in PostgreSQL. A background publisher atomically claims pending outbox rows, sends each event to every consumer, and marks it published only after all consumers acknowledge it. Failed attempts return to the outbox with exponential backoff and jitter; five exhausted attempts retain the event as `DEAD_LETTER` with the failure reason. Each consumer records its event ID in PostgreSQL before running its current side effect, so retries remain idempotent across consumer restarts. A process exit no longer loses committed producer work or consumer receipts. Delivery is at-least-once, not exactly-once; broker transport is still pending.
+Order creation and its `order.created` envelope commit together in PostgreSQL. A background publisher atomically claims pending outbox rows and publishes persistent messages to RabbitMQ using publisher confirms; only a broker confirmation marks the outbox row published. Three durable quorum queues retain independent consumer work through broker and consumer restarts. Each consumer records its event ID in PostgreSQL before running its current side effect, then acknowledges the broker message, so redelivery remains idempotent. Delivery is at-least-once, not exactly-once. See [event delivery](event-delivery.md) for retry, dead-letter, and recovery operations.
 
 The production API uses the standards-compliant `graphql` package. `POST /graphql` currently exposes the service catalog, observed graph, and BFS shortest paths.
 

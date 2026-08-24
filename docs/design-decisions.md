@@ -7,12 +7,12 @@
 - Tradeoff: services share a language and deployment shape.
 - Reason: network behavior stays real without duplicating plumbing.
 
-## Transactional HTTP outbox
+## Transactional RabbitMQ outbox
 
-- Decision: commit orders and event envelopes together, then asynchronously fan out claimed outbox rows over HTTP.
-- Alternative: couple order acceptance to synchronous consumer calls or wait to add persistence with the broker.
-- Tradeoff: producer retries and consumer receipts survive restart, but HTTP fanout still lacks broker acknowledgements and retained queued work.
-- Reason: establish the transaction boundary and reusable outbox lifecycle before replacing HTTP with broker acknowledgements.
+- Decision: commit orders and event envelopes together, then publish persistent messages with confirms to three durable RabbitMQ quorum queues.
+- Alternative: synchronous HTTP fanout or PostgreSQL polling by every consumer.
+- Tradeoff: local delivery and receipts survive ordinary restarts, but the single local RabbitMQ node is not highly available.
+- Reason: RabbitMQ provides explicit publisher and consumer acknowledgements, retained per-consumer work, bounded redelivery, and dead-letter inspection without coupling order acceptance to consumers.
 
 ## PostgreSQL operational history
 

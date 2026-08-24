@@ -1,6 +1,6 @@
 # History storage
 
-Nimbus stores incidents, audit events, orders, producer outbox state, and per-consumer event receipts in the local PostgreSQL container. Telemetry samples, calculated service health, and observed topology remain bounded in process memory and reset when their container restarts.
+Nimbus stores incidents, audit events, orders, producer outbox state, and per-consumer event receipts in the local PostgreSQL container. RabbitMQ retains queued and dead-lettered messages in its own named volume. Telemetry samples, calculated service health, and observed topology remain bounded in process memory and reset when their container restarts.
 
 `docker compose up --build` starts PostgreSQL and applies any unapplied files in `migrations/` before the control plane listens. Applied versions are recorded in `schema_migrations`, so restarting the control plane safely reruns the migration check.
 
@@ -15,7 +15,7 @@ docker compose exec postgres psql -U nimbus -d nimbus -c "select consumer_name, 
 
 The Compose credentials and `DATABASE_URL` are local development defaults, not credentials for another environment. Supply `DATABASE_URL` through environment configuration outside the local stack.
 
-The named volume survives ordinary container restarts but is not a backup. To remove all local Nimbus history and recreate an empty database, stop the stack and delete its volumes:
+The named volumes survive ordinary container restarts but are not backups. To remove all local Nimbus history and queued messages, stop the stack and delete its volumes:
 
 ```bash
 docker compose down --volumes

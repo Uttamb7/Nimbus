@@ -32,6 +32,18 @@ services:
       retries: 15
       start_period: 3s
     volumes: [nimbus-postgres:/var/lib/postgresql/data]
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    restart: unless-stopped
+    environment: { RABBITMQ_DEFAULT_USER: nimbus, RABBITMQ_DEFAULT_PASS: nimbus-local }
+    ports: ["15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    volumes: [nimbus-rabbitmq:/var/lib/rabbitmq]
   gateway:
     <<: *service
     environment:
@@ -57,31 +69,33 @@ services:
       SERVICE_NAME: order-orchestrator
       PORT: 8080
       INVENTORY_URL: http://inventory-api:8080
-      EVENT_TARGETS: http://payment-worker:8080/events,http://notification-router:8080/events,http://analytics-ingestor:8080/events
+      BROKER_URL: amqp://nimbus:nimbus-local@rabbitmq:5672?heartbeat=5
       TELEMETRY_URL: http://control-plane:4000/observe
       DATABASE_URL: postgresql://nimbus:nimbus-local@postgres:5432/nimbus
       FAULT_STATUS: ${ORDER_FAULT_STATUS:-}
     depends_on:
       postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
       inventory-api: { condition: service_started }
-      payment-worker: { condition: service_started }
-      notification-router: { condition: service_started }
-      analytics-ingestor: { condition: service_started }
   payment-worker:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: payment-worker, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", FAULT_STATUS: "${PAYMENT_FAULT_STATUS:-}" }
+    environment: { <<: *env, SERVICE_NAME: payment-worker, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", BROKER_URL: "amqp://nimbus:nimbus-local@rabbitmq:5672?heartbeat=5", FAULT_STATUS: "${PAYMENT_FAULT_STATUS:-}" }
     depends_on:
       postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
   notification-router:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: notification-router, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", FAULT_STATUS: "${NOTIFICATION_FAULT_STATUS:-}" }
+    environment: { <<: *env, SERVICE_NAME: notification-router, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", BROKER_URL: "amqp://nimbus:nimbus-local@rabbitmq:5672?heartbeat=5", FAULT_STATUS: "${NOTIFICATION_FAULT_STATUS:-}" }
     depends_on:
       postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
   analytics-ingestor:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: analytics-ingestor, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", FAULT_STATUS: "${ANALYTICS_FAULT_STATUS:-}" }
+    environment: { <<: *env, SERVICE_NAME: analytics-ingestor, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", BROKER_URL: "amqp://nimbus:nimbus-local@rabbitmq:5672?heartbeat=5", FAULT_STATUS: "${ANALYTICS_FAULT_STATUS:-}" }
     depends_on:
       postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
 volumes:
   nimbus-postgres:
+  nimbus-rabbitmq:

@@ -13,7 +13,7 @@ export const config = {
   identityUrl: process.env.IDENTITY_URL,
   orderUrl: process.env.ORDER_URL,
   inventoryUrl: process.env.INVENTORY_URL,
-  eventTargets: process.env.EVENT_TARGETS?.split(",").filter(Boolean) || [],
+  brokerUrl: process.env.BROKER_URL,
   telemetryUrl: process.env.TELEMETRY_URL,
   faultStatus,
   demoMode: process.env.DEMO_MODE === "true",
