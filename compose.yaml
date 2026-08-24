@@ -69,13 +69,19 @@ services:
       analytics-ingestor: { condition: service_started }
   payment-worker:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: payment-worker, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${PAYMENT_FAULT_STATUS:-}" }
+    environment: { <<: *env, SERVICE_NAME: payment-worker, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", FAULT_STATUS: "${PAYMENT_FAULT_STATUS:-}" }
+    depends_on:
+      postgres: { condition: service_healthy }
   notification-router:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: notification-router, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${NOTIFICATION_FAULT_STATUS:-}" }
+    environment: { <<: *env, SERVICE_NAME: notification-router, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", FAULT_STATUS: "${NOTIFICATION_FAULT_STATUS:-}" }
+    depends_on:
+      postgres: { condition: service_healthy }
   analytics-ingestor:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: analytics-ingestor, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${ANALYTICS_FAULT_STATUS:-}" }
+    environment: { <<: *env, SERVICE_NAME: analytics-ingestor, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", FAULT_STATUS: "${ANALYTICS_FAULT_STATUS:-}" }
+    depends_on:
+      postgres: { condition: service_healthy }
 
 volumes:
   nimbus-postgres:

@@ -11,7 +11,7 @@
 
 - Decision: commit orders and event envelopes together, then asynchronously fan out claimed outbox rows over HTTP.
 - Alternative: couple order acceptance to synchronous consumer calls or wait to add persistence with the broker.
-- Tradeoff: producer retries survive restart, but HTTP fanout can redeliver to already successful consumers and consumer receipts are not yet durable.
+- Tradeoff: producer retries and consumer receipts survive restart, but HTTP fanout still lacks broker acknowledgements and retained queued work.
 - Reason: establish the transaction boundary and reusable outbox lifecycle before replacing HTTP with broker acknowledgements.
 
 ## PostgreSQL operational history

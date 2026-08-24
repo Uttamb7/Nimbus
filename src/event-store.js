@@ -54,6 +54,17 @@ export class EventStore {
     return { event: result.rows[0].event, attemptCount: result.rows[0].attempt_count };
   }
 
+  async recordConsumerEvent(consumerName, eventId) {
+    const result = await this.pool.query(
+      `INSERT INTO consumer_receipts (consumer_name, event_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING
+       RETURNING event_id`,
+      [consumerName, eventId],
+    );
+    return result.rowCount === 1;
+  }
+
   markPublished(eventId) {
     return this.pool.query(
       "UPDATE outbox_events SET status = 'PUBLISHED', published_at = now(), claimed_at = NULL, failure_reason = NULL WHERE id = $1 AND status = 'PUBLISHING'",

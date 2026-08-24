@@ -30,6 +30,25 @@ for (let attempt = 0; attempt < 20; attempt++) {
 }
 assert.equal(outbox, "PUBLISHED|order.created|1");
 
+const event = JSON.parse(execFileSync("docker", ["compose", "exec", "-T", "postgres", "psql", "-U", "nimbus", "-d", "nimbus", "-Atc", `SELECT event::text FROM outbox_events WHERE aggregate_id = '${order.orderId}'`], { encoding: "utf8" }));
+execFileSync("docker", ["compose", "restart", "payment-worker"], { stdio: "inherit" });
+const duplicate = JSON.parse(execFileSync("docker", ["compose", "exec", "-T", "order-orchestrator", "node", "-e", `
+  (async () => {
+    const event = ${JSON.stringify(event)};
+    for (let attempt = 0; attempt < 40; attempt++) {
+      try {
+        const response = await fetch("http://payment-worker:8080/events", { method: "POST", body: JSON.stringify(event) });
+        if (response.ok) { console.log(JSON.stringify({ status: response.status, body: await response.json() })); return; }
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    process.exit(1);
+  })();
+`], { encoding: "utf8" }));
+assert.deepEqual(duplicate, { status: 200, body: { duplicate: true } });
+const receiptCount = Number(execFileSync("docker", ["compose", "exec", "-T", "postgres", "psql", "-U", "nimbus", "-d", "nimbus", "-Atc", `SELECT count(*) FROM consumer_receipts WHERE consumer_name = 'payment-worker' AND event_id = '${event.eventId}'`], { encoding: "utf8" }).trim());
+assert.equal(receiptCount, 1);
+
 const query = "{ serviceGraph { source destination requestCount errorCount averageLatencyMs } }";
 let edges = [];
 for (let attempt = 0; attempt < 20; attempt++) {
@@ -73,4 +92,4 @@ const persisted = await graphql("{ incidents { id status createdAt acknowledgedA
 assert.ok(persisted.incidents.some((value) => value.id === incident.id && value.status === "RESOLVED" && value.createdAt === incident.createdAt && value.acknowledgedAt && value.resolvedAt));
 assert.ok(persisted.auditLog.some((value) => value.action === "incident.acknowledged" && value.resourceId === incident.id));
 assert.ok(persisted.auditLog.some((value) => value.action === "incident.resolved" && value.resourceId === incident.id));
-console.log(`checkout ${order.orderId}: durable event published; ${edges.length} observed edges; incident ${incident.id} survived restart`);
+console.log(`checkout ${order.orderId}: durable event published and duplicate suppressed after consumer restart; ${edges.length} observed edges; incident ${incident.id} survived restart`);

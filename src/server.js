@@ -53,8 +53,9 @@ async function route(req, res, eventStore) {
 
   if (url.pathname === "/events" && req.method === "POST") {
     const event = await body(req);
-    if (seenEvents.has(event.eventId)) return send(res, 200, { duplicate: true });
-    seenEvents.add(event.eventId);
+    const firstDelivery = eventStore ? await eventStore.recordConsumerEvent(config.name, event.eventId) : !seenEvents.has(event.eventId);
+    if (!firstDelivery) return send(res, 200, { duplicate: true });
+    if (!eventStore) seenEvents.add(event.eventId);
     console.log(JSON.stringify({ type: "event", service: config.name, event_id: event.eventId, correlation_id: event.correlationId }));
     return send(res, 202, { accepted: true });
   }
@@ -65,12 +66,12 @@ async function route(req, res, eventStore) {
 export async function start(port = config.port, dependencies = {}) {
   let eventStore = dependencies.eventStore;
   let publisher = dependencies.publisher;
-  const ownsStore = config.name === "order-orchestrator" && config.databaseUrl && !eventStore;
+  const ownsStore = config.databaseUrl && !eventStore;
   if (ownsStore) {
     eventStore = new EventStore({ connectionString: config.databaseUrl });
     await eventStore.migrate();
   }
-  if (eventStore && !publisher) publisher = new OutboxPublisher({ store: eventStore, targets: config.eventTargets });
+  if (config.name === "order-orchestrator" && eventStore && !publisher) publisher = new OutboxPublisher({ store: eventStore, targets: config.eventTargets });
 
   const server = createServer((req, res) => route(req, res, eventStore).catch((error) => {
     console.error(JSON.stringify({ type: "error", service: config.name, message: error.message }));

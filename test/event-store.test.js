@@ -51,3 +51,17 @@ test("outbox claim returns the persisted attempt count", async () => {
   assert.match(query, /FOR UPDATE SKIP LOCKED/);
   assert.match(query, /claimed_at < now\(\) - interval '30 seconds'/);
 });
+
+test("consumer receipt insert identifies duplicate delivery", async () => {
+  const queries = [];
+  const pool = { query: async (text, values) => {
+    queries.push({ text, values });
+    return { rowCount: queries.length === 1 ? 1 : 0 };
+  } };
+  const store = new EventStore({ pool });
+
+  assert.equal(await store.recordConsumerEvent("payment-worker", "b08a1c40-1f55-4fc9-b0cc-d170ac248476"), true);
+  assert.equal(await store.recordConsumerEvent("payment-worker", "b08a1c40-1f55-4fc9-b0cc-d170ac248476"), false);
+  assert.match(queries[0].text, /ON CONFLICT DO NOTHING/);
+  assert.deepEqual(queries[0].values, ["payment-worker", "b08a1c40-1f55-4fc9-b0cc-d170ac248476"]);
+});
