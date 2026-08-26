@@ -17,6 +17,8 @@ export function annotateTrace(attributes) {
 export async function startTracing() {
   if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) return null;
   process.env.OTEL_SERVICE_NAME ||= process.env.SERVICE_NAME;
+  const { register } = await import("node:module");
+  register("@opentelemetry/instrumentation/hook.mjs", import.meta.url);
   const [
     { NodeTracerProvider },
     { BatchSpanProcessor },

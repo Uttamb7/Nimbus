@@ -25,7 +25,7 @@ async function waitFor(read, predicate, message, attempts = 120) {
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`${message}: ${value}`);
+  throw new Error(`${message}: ${typeof value === "object" ? JSON.stringify(value) : value}`);
 }
 
 async function waitForBroker() {
@@ -40,7 +40,11 @@ async function findCheckoutTrace(correlationId) {
   const response = await fetch("http://127.0.0.1:16686/api/traces?service=gateway&limit=20&lookback=1h");
   if (!response.ok) throw new Error(`Jaeger returned ${response.status}`);
   const result = await response.json();
-  return result.data?.find((candidate) => candidate.spans.some((span) => span.tags?.some((tag) => tag.key === "nimbus.correlation_id" && tag.value === correlationId)));
+  const traces = result.data || [];
+  return {
+    trace: traces.find((candidate) => candidate.spans.some((span) => span.tags?.some((tag) => tag.key === "nimbus.correlation_id" && tag.value === correlationId))),
+    observedServices: [...new Set(traces.flatMap((candidate) => Object.values(candidate.processes || {}).map((process) => process.serviceName)))].sort(),
+  };
 }
 
 function publishRaw(payload) {
@@ -141,11 +145,12 @@ const deadLetter = JSON.parse(brokerNode(`
 assert.deepEqual(deadLetter, { reason: "rejected" });
 
 const expectedTraceServices = ["analytics-ingestor", "gateway", "identity-api", "inventory-api", "notification-router", "order-orchestrator", "payment-worker"];
-const trace = await waitFor(
+const traceResult = await waitFor(
   () => findCheckoutTrace(order.correlationId),
-  (candidate) => expectedTraceServices.every((service) => Object.values(candidate?.processes || {}).some((process) => process.serviceName === service)),
+  (candidate) => expectedTraceServices.every((service) => Object.values(candidate?.trace?.processes || {}).some((process) => process.serviceName === service)),
   "checkout trace did not span HTTP and RabbitMQ services",
 );
+const trace = traceResult.trace;
 const traceServices = [...new Set(Object.values(trace.processes).map((process) => process.serviceName))].filter((service) => expectedTraceServices.includes(service)).sort();
 assert.deepEqual(traceServices, expectedTraceServices);
 assert.ok(trace.spans.every((span) => /^[\da-f]{32}$/.test(span.traceID) && /^[\da-f]{16}$/.test(span.spanID) && Number.isFinite(span.duration)));
