@@ -37,7 +37,7 @@ async function waitForBroker() {
 }
 
 async function findCheckoutTrace(correlationId) {
-  const response = await fetch("http://127.0.0.1:16686/api/traces?service=gateway&limit=20&lookback=3600000");
+  const response = await fetch("http://127.0.0.1:16686/api/traces?service=gateway&limit=20&lookback=1h");
   if (!response.ok) throw new Error(`Jaeger returned ${response.status}`);
   const result = await response.json();
   return result.data?.find((candidate) => candidate.spans.some((span) => span.tags?.some((tag) => tag.key === "nimbus.correlation_id" && tag.value === correlationId)));
