@@ -19,6 +19,8 @@ GraphQL endpoint: `http://localhost:4000/graphql`
 
 Operations console: `http://localhost:4000`
 
+Checkout traces: `http://localhost:16686`
+
 ```graphql
 { services { name health metrics { requestRate errorRate p95LatencyMs availability } } incidents { severity title affectedServices } }
 ```
@@ -29,6 +31,6 @@ Operations console: `http://localhost:4000`
 npm test
 ```
 
-See [architecture](docs/architecture.md) and [failure scenarios](docs/failure-scenarios.md).
+See [architecture](docs/architecture.md), [local tracing](docs/tracing.md), and [failure scenarios](docs/failure-scenarios.md).
 
 The [pipeline](docs/pipeline.md) verifies the distributed flow and delivers a private container image after successful `main` builds.

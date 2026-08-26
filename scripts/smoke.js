@@ -36,6 +36,13 @@ async function waitForBroker() {
   );
 }
 
+async function findCheckoutTrace(correlationId) {
+  const response = await fetch("http://127.0.0.1:16686/api/traces?service=gateway&limit=20&lookback=3600000");
+  if (!response.ok) throw new Error(`Jaeger returned ${response.status}`);
+  const result = await response.json();
+  return result.data?.find((candidate) => candidate.spans.some((span) => span.tags?.some((tag) => tag.key === "nimbus.correlation_id" && tag.value === correlationId)));
+}
+
 function publishRaw(payload) {
   brokerNode(`
     (async () => {
@@ -133,6 +140,22 @@ const deadLetter = JSON.parse(brokerNode(`
 `));
 assert.deepEqual(deadLetter, { reason: "rejected" });
 
+const expectedTraceServices = ["analytics-ingestor", "gateway", "identity-api", "inventory-api", "notification-router", "order-orchestrator", "payment-worker"];
+const trace = await waitFor(
+  () => findCheckoutTrace(order.correlationId),
+  (candidate) => expectedTraceServices.every((service) => Object.values(candidate?.processes || {}).some((process) => process.serviceName === service)),
+  "checkout trace did not span HTTP and RabbitMQ services",
+);
+const traceServices = [...new Set(Object.values(trace.processes).map((process) => process.serviceName))].filter((service) => expectedTraceServices.includes(service)).sort();
+assert.deepEqual(traceServices, expectedTraceServices);
+assert.ok(trace.spans.every((span) => /^[\da-f]{32}$/.test(span.traceID) && /^[\da-f]{16}$/.test(span.spanID) && Number.isFinite(span.duration)));
+assert.ok(trace.spans.some((span) => span.duration > 0));
+const traceTags = trace.spans.flatMap((span) => span.tags || []);
+assert.ok(traceTags.some((tag) => ["http.method", "http.request.method"].includes(tag.key)));
+assert.ok(traceTags.some((tag) => ["http.status_code", "http.response.status_code"].includes(tag.key)));
+assert.ok(traceTags.some((tag) => tag.key === "nimbus.idempotency_key" && tag.value === "ci-checkout"));
+assert.equal(traceTags.some((tag) => /authorization|request\.body/i.test(tag.key)), false);
+
 const query = "{ serviceGraph { source destination requestCount errorCount averageLatencyMs } }";
 let edges = [];
 for (let attempt = 0; attempt < 20; attempt++) {
@@ -176,4 +199,4 @@ const persisted = await graphql("{ incidents { id status createdAt acknowledgedA
 assert.ok(persisted.incidents.some((value) => value.id === incident.id && value.status === "RESOLVED" && value.createdAt === incident.createdAt && value.acknowledgedAt && value.resolvedAt));
 assert.ok(persisted.auditLog.some((value) => value.action === "incident.acknowledged" && value.resourceId === incident.id));
 assert.ok(persisted.auditLog.some((value) => value.action === "incident.resolved" && value.resourceId === incident.id));
-console.log(`checkout ${order.orderId}: broker outage and restarts recovered, duplicate suppressed, dead letter retained; ${edges.length} observed edges; incident ${incident.id} survived restart`);
+console.log(`checkout ${order.orderId}: ${traceServices.length} services traced through broker recovery, duplicate suppressed, dead letter retained; ${edges.length} observed edges; incident ${incident.id} survived restart`);

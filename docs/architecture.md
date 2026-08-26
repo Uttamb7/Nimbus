@@ -10,9 +10,12 @@ gateway -> order-orchestrator -> inventory-api
                            \-> PostgreSQL outbox -> RabbitMQ -> payment-worker
                                                               -> notification-router
                                                               -> analytics-ingestor
+services -> OpenTelemetry Collector -> Jaeger
 ```
 
 Order creation and its `order.created` envelope commit together in PostgreSQL. A background publisher atomically claims pending outbox rows and publishes persistent messages to RabbitMQ using publisher confirms; only a broker confirmation marks the outbox row published. Three durable quorum queues retain independent consumer work through broker and consumer restarts. Each consumer records its event ID in PostgreSQL before running its current side effect, then acknowledges the broker message, so redelivery remains idempotent. Delivery is at-least-once, not exactly-once. See [event delivery](event-delivery.md) for retry, dead-letter, and recovery operations.
+
+Each service emits HTTP and RabbitMQ spans through a health-checked local OpenTelemetry Collector to Jaeger. W3C trace context follows HTTP headers, is stored with the transactional outbox event, and resumes when the event is published after an orchestrator or broker outage. Correlation and idempotency IDs are span attributes; request bodies and credentials are not captured. This tracing extends the existing measured topology rather than replacing it. See [local tracing](tracing.md) for inspection and retention details.
 
 The production API uses the standards-compliant `graphql` package. `POST /graphql` currently exposes the service catalog, observed graph, and BFS shortest paths.
 

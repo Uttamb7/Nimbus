@@ -4,7 +4,7 @@ import { orderCreated, OutboxPublisher } from "../src/events.js";
 
 test("order event envelope carries durable delivery identifiers", () => {
   const event = orderCreated(
-    { correlationId: "correlation-1", idempotencyKey: "checkout-1", orderId: "order-1", reservationId: "reservation-1" },
+    { correlationId: "correlation-1", idempotencyKey: "checkout-1", orderId: "order-1", reservationId: "reservation-1", traceContext: { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" } },
     () => "2026-08-20T12:00:00.000Z",
     () => "event-1",
   );
@@ -17,6 +17,7 @@ test("order event envelope carries durable delivery identifiers", () => {
     createdAt: "2026-08-20T12:00:00.000Z",
     orderId: "order-1",
     reservationId: "reservation-1",
+    traceContext: { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" },
   });
 });
 

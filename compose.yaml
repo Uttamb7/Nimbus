@@ -2,6 +2,7 @@ x-env: &env
   PORT: 8080
   DEMO_MODE: "true"
   ADMIN_TOKEN: local-nimbus
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
 
 x-service: &service
   build: .
@@ -15,6 +16,23 @@ x-service: &service
     start_period: 3s
 
 services:
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.20.0
+    restart: unless-stopped
+    environment: { OTEL_TRACES_SAMPLER: always_off }
+    ports: ["16686:16686"]
+  otel-collector:
+    build:
+      context: .
+      dockerfile: Collector.Dockerfile
+    restart: unless-stopped
+    depends_on: [jaeger]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:13133/"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 3s
   control-plane:
     <<: *service
     environment: { <<: *env, SERVICE_NAME: control-plane, PORT: 4000, AUTH_TOKENS: "local-viewer:viewer:viewer,local-operator:operator:operator,local-admin:admin:Uttamb7", DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus" }

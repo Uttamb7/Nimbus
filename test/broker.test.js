@@ -11,6 +11,7 @@ const event = {
   createdAt: "2026-08-24T12:00:00.000Z",
   orderId: "af0fb946-d2d2-4a49-a9d4-c2e2096ba695",
   reservationId: "713615df-5085-4aec-8f45-79580c66b63d",
+  traceContext: { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" },
 };
 
 test("broker topology uses durable quorum queues with dead lettering", async () => {
@@ -44,6 +45,7 @@ test("publisher waits for a persistent broker confirmation", async () => {
   assert.deepEqual(JSON.parse(published[2]), event);
   assert.equal(published[3].persistent, true);
   assert.equal(published[3].messageId, event.eventId);
+  assert.deepEqual(published[3].headers, event.traceContext);
   assert.equal(confirmed, true);
 });
 

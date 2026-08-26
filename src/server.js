@@ -6,11 +6,13 @@ import { config } from "./config.js";
 import { EventStore } from "./event-store.js";
 import { orderCreated, OutboxPublisher } from "./events.js";
 import { body, request, send } from "./http.js";
+import { annotateTrace, currentTraceContext } from "./tracing.js";
 
 const seenEvents = new Set();
 let fault = { status: config.faultStatus, latencyMs: 0, expiresAt: Infinity };
 
 async function processEvent(event, eventStore) {
+  annotateTrace({ "nimbus.correlation_id": event.correlationId, "nimbus.idempotency_key": event.idempotencyKey });
   const firstDelivery = eventStore ? await eventStore.recordConsumerEvent(config.name, event.eventId) : !seenEvents.has(event.eventId);
   if (!firstDelivery) return false;
   if (!eventStore) seenEvents.add(event.eventId);
@@ -21,6 +23,7 @@ async function processEvent(event, eventStore) {
 async function route(req, res, eventStore) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const correlationId = req.headers["x-correlation-id"] || randomUUID();
+  annotateTrace({ "nimbus.correlation_id": correlationId });
   res.setHeader("x-correlation-id", correlationId);
 
   if (url.pathname === "/health") return send(res, 200, { service: config.name, status: "healthy" });
@@ -44,17 +47,21 @@ async function route(req, res, eventStore) {
 
   if (config.name === "gateway" && url.pathname === "/checkout" && req.method === "POST") {
     const input = await body(req);
+    const idempotencyKey = req.headers["idempotency-key"] || randomUUID();
+    annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const [user, order] = await Promise.all([
       request(`${config.identityUrl}/users/me`, {}, correlationId),
-      request(`${config.orderUrl}/orders`, { method: "POST", body: JSON.stringify(input) }, correlationId),
+      request(`${config.orderUrl}/orders`, { method: "POST", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify(input) }, correlationId),
     ]);
     return send(res, 202, { userId: user.id, ...order, correlationId });
   }
 
   if (config.name === "order-orchestrator" && url.pathname === "/orders" && req.method === "POST") {
     const input = await body(req);
+    const idempotencyKey = req.headers["idempotency-key"] || randomUUID();
+    annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);
-    const event = orderCreated({ correlationId, idempotencyKey: req.headers["idempotency-key"] || randomUUID(), orderId: randomUUID(), reservationId: reservation.reservationId });
+    const event = orderCreated({ correlationId, idempotencyKey, orderId: randomUUID(), reservationId: reservation.reservationId, traceContext: currentTraceContext() });
     if (eventStore) await eventStore.createOrder(event);
     return send(res, 202, { orderId: event.orderId, status: "accepted" });
   }

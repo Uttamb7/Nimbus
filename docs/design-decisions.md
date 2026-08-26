@@ -20,3 +20,10 @@
 - Alternative: persist every observation and calculated metric.
 - Tradeoff: incident and audit history survives control-plane restarts, but topology and calculated health rebuild from new observations.
 - Reason: preserve the operator timeline and provide the storage foundation for durable event delivery without turning Nimbus into a telemetry database.
+
+## Local OpenTelemetry traces
+
+- Decision: export service spans through a local OpenTelemetry Collector to an in-memory Jaeger backend.
+- Alternative: send each service directly to a backend or use a hosted tracing account.
+- Tradeoff: the Collector keeps service configuration vendor-neutral, while local Jaeger trace data is intentionally lost when its container restarts.
+- Reason: verify one checkout across HTTP, the transactional outbox, and RabbitMQ without external credentials or claims of production traffic.

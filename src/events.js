@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as wait } from "node:timers/promises";
 
-export function orderCreated({ correlationId, idempotencyKey, orderId, reservationId }, now = () => new Date().toISOString(), uuid = randomUUID) {
-  return { eventId: uuid(), correlationId, idempotencyKey, type: "order.created", version: 1, createdAt: now(), orderId, reservationId };
+export function orderCreated({ correlationId, idempotencyKey, orderId, reservationId, traceContext }, now = () => new Date().toISOString(), uuid = randomUUID) {
+  return { eventId: uuid(), correlationId, idempotencyKey, type: "order.created", version: 1, createdAt: now(), orderId, reservationId, ...(traceContext?.traceparent ? { traceContext } : {}) };
 }
 
 export class OutboxPublisher {
