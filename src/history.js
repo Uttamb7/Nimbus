@@ -1,5 +1,6 @@
 import pg from "pg";
 import { migrate } from "./migrations.js";
+import { LiveEvents } from "./live-events.js";
 
 const { Pool } = pg;
 
@@ -31,6 +32,7 @@ export class History {
 
   constructor({ connectionString, pool } = {}) {
     this.pool = pool || (connectionString ? new Pool({ connectionString }) : null);
+    this.events = new LiveEvents();
   }
 
   migrate(directory) {
@@ -41,6 +43,7 @@ export class History {
     if (!this.pool) {
       if (this.#incidents.some((value) => value.suspectedService === incident.suspectedService && value.status !== "RESOLVED")) return null;
       this.#incidents.unshift({ ...incident });
+      this.events.publish("incidentChanged", { ...incident });
       return { ...incident };
     }
     const result = await this.pool.query(
@@ -49,7 +52,9 @@ export class History {
        ON CONFLICT DO NOTHING RETURNING *`,
       [incident.id, incident.severity, incident.status, incident.title, incident.suspectedService, incident.triggerCondition, incident.createdAt],
     );
-    return result.rows[0] ? incidentFromRow(result.rows[0]) : null;
+    const created = result.rows[0] ? incidentFromRow(result.rows[0]) : null;
+    if (created) this.events.publish("incidentChanged", created);
+    return created;
   }
 
   async incidents() {
@@ -74,6 +79,7 @@ export class History {
       incident.status = status;
       if (status === "ACKNOWLEDGED") incident.acknowledgedAt ||= timestamp;
       if (status === "RESOLVED") incident.resolvedAt = timestamp;
+      this.events.publish("incidentChanged", { ...incident });
       return { ...incident };
     }
     const field = status === "ACKNOWLEDGED" ? "acknowledged_at" : "resolved_at";
@@ -81,12 +87,15 @@ export class History {
       `UPDATE incidents SET status = $2, ${field} = COALESCE(${field}, $3) WHERE id = $1 AND status <> 'RESOLVED' RETURNING *`,
       [id, status, timestamp],
     );
-    return result.rows[0] ? incidentFromRow(result.rows[0]) : null;
+    const updated = result.rows[0] ? incidentFromRow(result.rows[0]) : null;
+    if (updated) this.events.publish("incidentChanged", updated);
+    return updated;
   }
 
   async appendAudit(event) {
     if (!this.pool) {
       this.#audit.unshift(event);
+      this.events.publish("auditEventAdded", { ...event });
       return { ...event };
     }
     const result = await this.pool.query(
@@ -94,7 +103,9 @@ export class History {
        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING *`,
       [event.id, event.timestamp, event.actor, event.action, event.resource, event.resourceId, event.metadata],
     );
-    return auditFromRow(result.rows[0]);
+    const recorded = auditFromRow(result.rows[0]);
+    this.events.publish("auditEventAdded", recorded);
+    return recorded;
   }
 
   async auditLog() {

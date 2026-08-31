@@ -40,6 +40,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - run: docker compose build
       - run: docker compose up --detach --wait
       - run: node scripts/smoke.js

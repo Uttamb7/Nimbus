@@ -1,3 +1,5 @@
+import { connectLive } from "./live.js";
+
 const $ = (selector) => document.querySelector(selector);
 const endpoint = "/graphql";
 const positions = { gateway:[90,205], "identity-api":[315,95], "order-orchestrator":[315,285], "inventory-api":[565,205], "payment-worker":[735,105], "notification-router":[735,215], "analytics-ingestor":[735,325] };
@@ -5,7 +7,7 @@ let state = { services:[], serviceGraph:[], incidents:[], auditLog:[], systemHea
 let selected = "gateway";
 
 async function graphql(query, variables) {
-  const response = await fetch(endpoint, { method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer local-admin" }, body:JSON.stringify({ query, variables }) });
+  const response = await fetch(endpoint, { method:"POST", headers:{ "content-type":"application/json", authorization:"Bearer local-admin" }, body:JSON.stringify({ query, variables }), signal:AbortSignal.timeout(5_000) });
   const result = await response.json();
   if (result.errors) throw new Error(result.errors[0].message);
   return result.data;
@@ -73,13 +75,15 @@ function renderSummary() {
 }
 
 function render(){renderSummary();renderTopology();renderDetail();renderServices();renderFeeds();}
-async function refresh(){try{state=await graphql(query);render();$("#sync-state").textContent="LIVE";}catch(error){$("#sync-state").textContent="DISCONNECTED";toast(error.message,true);}}
-async function mutate(document,variables,message){try{await graphql(document,variables);toast(message);await refresh();}catch(error){toast(error.message,true);}}
+async function refresh(){state=await graphql(query);render();}
+async function mutate(document,variables,message){try{await graphql(document,variables);toast(message);live.refresh();}catch(error){toast(error.message,true);}}
 function toast(message,error=false){const node=$("#toast");node.textContent=message;node.className=`show ${error?"error":""}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.className="",2600);}
 
 $("#fault-form").addEventListener("submit",(event)=>{event.preventDefault();mutate(`mutation($service:String!,$status:Int!,$latency:Int!,$duration:Int!){ injectFailure(service:$service,status:$status,latencyMs:$latency,durationSeconds:$duration){ id } }`,{service:$("#fault-service").value,status:Number($("#fault-status").value),latency:Number($("#fault-latency").value),duration:Number($("#fault-duration").value)},"Fault injected");});
 $("#restore").addEventListener("click",()=>mutate(`mutation($service:String!){ restoreService(service:$service){ id } }`,{service:$("#fault-service").value},"Service restored"));
 $("#generate").addEventListener("click",()=>mutate(`mutation{ generateTraffic(count:5){ id } }`,{},"Traffic generated"));
-$("#refresh").addEventListener("click",refresh);$("#blast-mode").addEventListener("change",renderTopology);
+$("#refresh").addEventListener("click",()=>live.refresh());$("#blast-mode").addEventListener("change",renderTopology);
 $("#fault-service").innerHTML=["gateway","identity-api","inventory-api","order-orchestrator","payment-worker","notification-router","analytics-ingestor"].map((name)=>`<option>${name}</option>`).join("");
-setInterval(()=>$("#clock").textContent=new Date().toLocaleTimeString(),1000);setInterval(refresh,3000);refresh();
+setInterval(()=>$("#clock").textContent=new Date().toLocaleTimeString(),1000);
+const live = connectLive({ createClient: globalThis.graphqlWs.createClient, url: `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/graphql/ws`, authorization: "Bearer local-admin", refresh, onState: (status) => { $("#sync-state").textContent = status; } });
+window.addEventListener("pagehide",()=>live.stop(),{once:true});

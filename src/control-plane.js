@@ -11,19 +11,20 @@ import { Actions } from "./actions.js";
 import { authenticate } from "./auth.js";
 import { inspectQuery, RateLimiter } from "./graphql-guard.js";
 import { History } from "./history.js";
+import { attachSubscriptions } from "./subscriptions.js";
 
 export const topology = new Topology();
 export const history = new History({ connectionString: config.databaseUrl });
 export const operations = new Operations({ history });
 export const actions = new Actions(operations);
-const assets = { "/": ["index.html", "text/html; charset=utf-8"], "/app.js": ["app.js", "text/javascript; charset=utf-8"], "/styles.css": ["styles.css", "text/css; charset=utf-8"] };
+const assets = { "/": ["web/index.html", "text/html; charset=utf-8"], "/app.js": ["web/app.js", "text/javascript; charset=utf-8"], "/live.js": ["web/live.js", "text/javascript; charset=utf-8"], "/graphql-ws.js": ["node_modules/graphql-ws/umd/graphql-ws.min.js", "text/javascript; charset=utf-8"], "/styles.css": ["web/styles.css", "text/css; charset=utf-8"] };
 const rateLimiter = new RateLimiter();
 
 async function route(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
   if (assets[url.pathname] && request.method === "GET") {
     const [file, contentType] = assets[url.pathname];
-    const content = await readFile(join(process.cwd(), "web", file));
+    const content = await readFile(join(process.cwd(), file));
     response.writeHead(200, { "content-type": contentType, "content-length": content.length, "cache-control": "no-store", "content-security-policy": "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:", "x-content-type-options": "nosniff", "x-frame-options": "DENY" });
     return response.end(content);
   }
@@ -49,5 +50,6 @@ async function route(request, response) {
 export async function start(port = config.port) {
   await history.migrate();
   const server = createServer((request, response) => route(request, response).catch((error) => send(response, 400, { errors: [{ message: error.message }] })));
+  attachSubscriptions(server, { topology, operations, authTokens: config.authTokens, rateLimiter });
   return new Promise((resolve) => server.listen(port, () => resolve(server)));
 }

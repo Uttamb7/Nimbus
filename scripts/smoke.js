@@ -16,6 +16,33 @@ const compose = (args, options = {}) => execFileSync("docker", ["compose", ...ar
 const sql = (query) => compose(["exec", "-T", "postgres", "psql", "-U", "nimbus", "-d", "nimbus", "-Atc", query]).trim();
 const brokerNode = (source) => compose(["exec", "-T", "order-orchestrator", "node", "-e", source]).trim();
 
+async function subscribeUpdates() {
+  const socket = new WebSocket("ws://127.0.0.1:4000/graphql/ws", "graphql-transport-ws");
+  const ready = new Set(), events = [];
+  let error;
+  socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "connection_init", payload: { authorization: "Bearer local-viewer" } })));
+  socket.addEventListener("error", () => { error = "WebSocket connection failed"; });
+  socket.addEventListener("message", ({ data }) => {
+    const message = JSON.parse(data);
+    if (message.type === "connection_ack") {
+      for (const [field, selection] of Object.entries({ serviceHealthChanged: "name health", incidentChanged: "id status", auditEventAdded: "id action resourceId" })) {
+        socket.send(JSON.stringify({ id: field, type: "subscribe", payload: { query: `subscription { ${field} { ${selection} } }` } }));
+      }
+    } else if (message.type === "next") {
+      if (message.payload.errors) { error = JSON.stringify(message.payload.errors); return; }
+      ready.add(message.id);
+      if (message.payload.data[message.id]) events.push({ field: message.id, value: message.payload.data[message.id] });
+    } else if (message.type === "error") error = JSON.stringify(message.payload);
+  });
+  try {
+    await waitFor(() => ({ count: ready.size, error }), (value) => value.count === 3 && !value.error, "subscriptions did not become ready", 40);
+  } catch (failure) {
+    socket.close();
+    throw failure;
+  }
+  return { socket, events, error: () => error };
+}
+
 async function waitFor(read, predicate, message, attempts = 120) {
   let value;
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -174,34 +201,50 @@ for (const dependency of ["gateway->identity-api", "gateway->order-orchestrator"
 }
 assert.ok(edges.every((edge) => edge.requestCount > 0 && edge.averageLatencyMs >= 0));
 
-for (let index = 0; index < 7; index++) {
-  const response = await fetch("http://127.0.0.1:4000/observe", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ source: "gateway", destination: "inventory-api", status: 503, durationMs: 1_000 }),
-  });
-  assert.equal(response.status, 202);
+const updates = await subscribeUpdates();
+try {
+  for (let index = 0; index < 7; index++) {
+    const response = await fetch("http://127.0.0.1:4000/observe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: "inventory-api", destination: "identity-api", status: 503, durationMs: 1_000 }),
+    });
+    assert.equal(response.status, 202);
+  }
+
+  const beforeRestart = await graphql("{ incidents { id status suspectedService createdAt } }");
+  const incident = beforeRestart.incidents.find((value) => value.status === "OPEN" && value.suspectedService === "inventory-api");
+  assert.ok(incident);
+  await graphql("mutation($id: ID!) { acknowledgeIncident(id: $id) { action resourceId } }", { id: incident.id }, "local-operator");
+  await graphql("mutation($id: ID!) { resolveIncident(id: $id) { action resourceId } }", { id: incident.id }, "local-operator");
+
+  await waitFor(() => updates.events, (events) =>
+    events.some(({ field, value }) => field === "serviceHealthChanged" && value.name === "inventory-api" && value.health === "CRITICAL") &&
+    ["OPEN", "ACKNOWLEDGED", "RESOLVED"].every((status) => events.some(({ field, value }) => field === "incidentChanged" && value.id === incident.id && value.status === status)) &&
+    ["incident.acknowledged", "incident.resolved"].every((action) => events.some(({ field, value }) => field === "auditEventAdded" && value.resourceId === incident.id && value.action === action)),
+    "subscription events did not reflect persisted incident lifecycle");
+  assert.equal(updates.error(), undefined);
+  updates.socket.close();
+
+  execFileSync("docker", ["compose", "restart", "control-plane"], { stdio: "inherit" });
+  let ready = false;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      ready = (await fetch("http://127.0.0.1:4000/health")).ok;
+    } catch {}
+    if (ready) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  assert.equal(ready, true, "control plane did not recover after restart");
+
+  const reconnected = await subscribeUpdates();
+  reconnected.socket.close();
+
+  const persisted = await graphql("{ incidents { id status createdAt acknowledgedAt resolvedAt } auditLog { action resourceId } }");
+  assert.ok(persisted.incidents.some((value) => value.id === incident.id && value.status === "RESOLVED" && value.createdAt === incident.createdAt && value.acknowledgedAt && value.resolvedAt));
+  assert.ok(persisted.auditLog.some((value) => value.action === "incident.acknowledged" && value.resourceId === incident.id));
+  assert.ok(persisted.auditLog.some((value) => value.action === "incident.resolved" && value.resourceId === incident.id));
+  console.log(`checkout ${order.orderId}: ${traceServices.length} services traced through broker recovery, duplicate suppressed, dead letter retained; ${edges.length} observed edges; incident ${incident.id} streamed and survived restart; subscriptions re-established`);
+} finally {
+  updates.socket.close();
 }
-
-const beforeRestart = await graphql("{ incidents { id status createdAt } }");
-const incident = beforeRestart.incidents.find((value) => value.status === "OPEN");
-assert.ok(incident);
-await graphql("mutation($id: ID!) { acknowledgeIncident(id: $id) { action resourceId } }", { id: incident.id }, "local-operator");
-await graphql("mutation($id: ID!) { resolveIncident(id: $id) { action resourceId } }", { id: incident.id }, "local-operator");
-
-execFileSync("docker", ["compose", "restart", "control-plane"], { stdio: "inherit" });
-let ready = false;
-for (let attempt = 0; attempt < 40; attempt++) {
-  try {
-    ready = (await fetch("http://127.0.0.1:4000/health")).ok;
-  } catch {}
-  if (ready) break;
-  await new Promise((resolve) => setTimeout(resolve, 250));
-}
-assert.equal(ready, true, "control plane did not recover after restart");
-
-const persisted = await graphql("{ incidents { id status createdAt acknowledgedAt resolvedAt } auditLog { action resourceId } }");
-assert.ok(persisted.incidents.some((value) => value.id === incident.id && value.status === "RESOLVED" && value.createdAt === incident.createdAt && value.acknowledgedAt && value.resolvedAt));
-assert.ok(persisted.auditLog.some((value) => value.action === "incident.acknowledged" && value.resourceId === incident.id));
-assert.ok(persisted.auditLog.some((value) => value.action === "incident.resolved" && value.resourceId === incident.id));
-console.log(`checkout ${order.orderId}: ${traceServices.length} services traced through broker recovery, duplicate suppressed, dead letter retained; ${edges.length} observed edges; incident ${incident.id} survived restart`);

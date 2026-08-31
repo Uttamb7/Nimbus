@@ -18,6 +18,7 @@ export class Operations {
     this.#samples.set(observation.source, samples);
 
     const metrics = this.metrics(observation.source);
+    this.history.events.publish("serviceHealthChanged", { name: observation.source, metrics });
     const violated = metrics.requestCount >= this.minSamples && (metrics.p95LatencyMs > this.p95LimitMs || metrics.errorRate > this.errorRateLimit);
     const count = violated ? (this.#violations.get(observation.source) || 0) + 1 : 0;
     this.#violations.set(observation.source, count);
