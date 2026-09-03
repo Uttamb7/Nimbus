@@ -5,3 +5,7 @@ Every pull request runs dependency auditing, coverage thresholds, Compose valida
 The smoke test starts the full local stack, performs a real checkout, and verifies both the measured dependency edges and a multi-service trace through broker-outage recovery. Failed integration runs print service logs before cleanup.
 
 Delivery uses GitHub's short-lived token and grants package-write permission only to the delivery job. Dependency updates are reviewed and committed manually by Uttamb7.
+
+The opt-in [canary verification workflow](canary.md) compares explicitly chosen
+stable and candidate image digests in isolated Compose stacks, retains measured
+results as an artifact, and fails on regressions. It never promotes an image.
