@@ -6,9 +6,10 @@ const percentile = (values, fraction) => values.length ? values[Math.max(0, Math
 export class Operations {
   #samples = new Map();
   #violations = new Map();
+  #recoveries = new Map();
 
-  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, now = () => Date.now(), history = new History() } = {}) {
-    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, now, history });
+  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, now = () => Date.now(), history = new History() } = {}) {
+    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, now, history });
   }
 
   observe(observation) {
@@ -22,10 +23,20 @@ export class Operations {
     const violated = metrics.requestCount >= this.minSamples && (metrics.p95LatencyMs > this.p95LimitMs || metrics.errorRate > this.errorRateLimit);
     const count = violated ? (this.#violations.get(observation.source) || 0) + 1 : 0;
     this.#violations.set(observation.source, count);
+    this.#recoveries.set(observation.source, !violated && metrics.requestCount >= this.minSamples ? (this.#recoveries.get(observation.source) || 0) + 1 : 0);
     if (count >= this.consecutiveWindows) {
+      this.#recoveries.set(observation.source, 0);
       const reason = metrics.p95LatencyMs > this.p95LimitMs ? `p95 latency exceeded ${this.p95LimitMs} ms` : `error rate exceeded ${this.errorRateLimit * 100}%`;
       const incident = { id: randomUUID(), severity: "SEV2", status: "OPEN", title: `${observation.source} is unhealthy`, suspectedService: observation.source, triggerCondition: reason, createdAt: new Date(this.now()).toISOString(), acknowledgedAt: null, resolvedAt: null };
       return this.history.createIncident(incident);
+    }
+    if (this.#recoveries.get(observation.source) >= this.recoveryWindows) {
+      this.#recoveries.set(observation.source, 0);
+      const timestamp = new Date(this.now()).toISOString();
+      return this.history.resolveRecoveredIncident(observation.source, Object.freeze({
+        id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
+        resource: "incident", metadata: JSON.stringify({ reason: "measured recovery", consecutiveWindows: this.recoveryWindows }),
+      }));
     }
   }
 

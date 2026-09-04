@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { History } from "../src/history.js";
 import { Operations } from "../src/operations.js";
 
 test("measured failures consume budget and create one incident", async () => {
@@ -19,4 +20,27 @@ test("measured failures consume budget and create one incident", async () => {
   const incidents = await operations.incidents();
   assert.equal(incidents.length, 1);
   assert.match(incidents[0].triggerCondition, /p95 latency/);
+});
+
+test("sustained measured recovery resolves an incident exactly once", async () => {
+  let now = 1_000;
+  const history = new History();
+  await history.createIncident({ id: "incident", severity: "SEV2", status: "OPEN", title: "gateway is unhealthy", suspectedService: "gateway", triggerCondition: "error rate", createdAt: new Date(now++).toISOString(), acknowledgedAt: null, resolvedAt: null });
+  const operations = new Operations({ history, minSamples: 1, errorRateLimit: 0.2, p95LimitMs: 1_000, recoveryWindows: 3, now: () => now++ });
+
+  await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  await operations.observe({ source: "gateway", status: 500, durationMs: 10 });
+  for (let index = 0; index < 3; index++) await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  assert.equal((await history.incident("incident")).status, "OPEN");
+
+  await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  assert.equal((await history.incident("incident")).status, "RESOLVED");
+  const audit = await history.auditLog();
+  assert.equal(audit.length, 1);
+  assert.deepEqual({ actor: audit[0].actor, action: audit[0].action, resourceId: audit[0].resourceId }, { actor: "nimbus-system", action: "incident.resolved", resourceId: "incident" });
+  assert.deepEqual(JSON.parse(audit[0].metadata), { reason: "measured recovery", consecutiveWindows: 3 });
+
+  for (let index = 0; index < 3; index++) await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  assert.equal((await history.auditLog()).length, 1);
 });

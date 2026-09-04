@@ -92,6 +92,54 @@ export class History {
     return updated;
   }
 
+  async resolveRecoveredIncident(service, event) {
+    if (!this.pool) {
+      const incident = this.#incidents.find((value) => value.suspectedService === service && value.status !== "RESOLVED");
+      if (!incident) return null;
+      incident.status = "RESOLVED";
+      incident.resolvedAt = event.timestamp;
+      const audit = Object.freeze({ ...event, resourceId: incident.id });
+      this.#audit.unshift(audit);
+      this.events.publish("incidentChanged", { ...incident });
+      this.events.publish("auditEventAdded", { ...audit });
+      return { incident: { ...incident }, audit };
+    }
+    const client = await this.pool.connect();
+    let incident;
+    let audit;
+    try {
+      await client.query("BEGIN");
+      const active = await client.query(
+        "SELECT id FROM incidents WHERE suspected_service = $1 AND status <> 'RESOLVED' FOR UPDATE",
+        [service],
+      );
+      if (!active.rows[0]) {
+        await client.query("COMMIT");
+        return null;
+      }
+      const updated = await client.query(
+        "UPDATE incidents SET status = 'RESOLVED', resolved_at = $2 WHERE id = $1 RETURNING *",
+        [active.rows[0].id, event.timestamp],
+      );
+      incident = incidentFromRow(updated.rows[0]);
+      const recorded = await client.query(
+        `INSERT INTO audit_events (id, recorded_at, actor, action, resource, resource_id, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING *`,
+        [event.id, event.timestamp, event.actor, event.action, event.resource, incident.id, event.metadata],
+      );
+      audit = auditFromRow(recorded.rows[0]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    this.events.publish("incidentChanged", incident);
+    this.events.publish("auditEventAdded", audit);
+    return { incident, audit };
+  }
+
   async appendAudit(event) {
     if (!this.pool) {
       this.#audit.unshift(event);
