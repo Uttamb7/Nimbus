@@ -16,3 +16,10 @@ test("GraphQL exposes observed edges", async () => {
   assert.deepEqual(JSON.parse(JSON.stringify(result.data.services[0])), { name: "gateway", health: "HEALTHY", metrics: { requestCount: 1, p95LatencyMs: 12 } });
   assert.equal(result.data.systemHealth.status, "HEALTHY");
 });
+
+test("GraphQL exposes traces to viewers", async () => {
+  const expected = [{ traceId: "trace", services: ["gateway"], spans: [] }];
+  const traces = { recent: async (input) => { assert.deepEqual(input, { service: "gateway", limit: 2 }); return expected; } };
+  const result = await graphql({ schema, source: `{ recentTraces(service: "gateway", limit: 2) { traceId services } }`, rootValue: root(new Topology(), new Operations(), undefined, { role: "viewer", actor: "Reader" }, traces) });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.recentTraces)), [{ traceId: "trace", services: ["gateway"] }]);
+});

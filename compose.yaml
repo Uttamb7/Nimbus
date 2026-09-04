@@ -35,7 +35,7 @@ services:
       start_period: 3s
   control-plane:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: control-plane, PORT: 4000, AUTH_TOKENS: "local-viewer:viewer:viewer,local-operator:operator:operator,local-admin:admin:Uttamb7", DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus" }
+    environment: { <<: *env, SERVICE_NAME: control-plane, PORT: 4000, AUTH_TOKENS: "local-viewer:viewer:viewer,local-operator:operator:operator,local-admin:admin:Uttamb7", DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", JAEGER_QUERY_URL: "http://jaeger:16686" }
     ports: ["4000:4000"]
     depends_on:
       postgres: { condition: service_healthy }

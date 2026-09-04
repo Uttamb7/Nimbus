@@ -188,6 +188,12 @@ assert.ok(traceTags.some((tag) => ["http.status_code", "http.response.status_cod
 assert.ok(traceTags.some((tag) => tag.key === "nimbus.idempotency_key" && tag.value === "ci-checkout"));
 assert.equal(traceTags.some((tag) => /authorization|request\.body/i.test(tag.key)), false);
 
+const nimbusTraces = (await graphql(`query($service:String!){ recentTraces(service:$service,limit:20){ traceId services spans { spanId parentSpanId service operation durationMs error } } }`, { service: "gateway" })).recentTraces;
+const nimbusTrace = nimbusTraces.find((candidate) => candidate.traceId === trace.traceID);
+assert.ok(nimbusTrace, "checkout trace was not exposed through Nimbus GraphQL");
+assert.deepEqual(nimbusTrace.services.filter((service) => expectedTraceServices.includes(service)), expectedTraceServices);
+assert.ok(nimbusTrace.spans.every((span) => span.spanId && span.service && span.operation && span.durationMs >= 0));
+
 const query = "{ serviceGraph { source destination requestCount errorCount averageLatencyMs } }";
 let edges = [];
 for (let attempt = 0; attempt < 20; attempt++) {

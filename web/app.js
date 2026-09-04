@@ -3,7 +3,7 @@ import { connectLive } from "./live.js";
 const $ = (selector) => document.querySelector(selector);
 const endpoint = "/graphql";
 const positions = { gateway:[90,205], "identity-api":[315,95], "order-orchestrator":[315,285], "inventory-api":[565,205], "payment-worker":[735,105], "notification-router":[735,215], "analytics-ingestor":[735,325] };
-let state = { services:[], serviceGraph:[], incidents:[], auditLog:[], systemHealth:{} };
+let state = { services:[], serviceGraph:[], incidents:[], auditLog:[], recentTraces:[], traceError:null, systemHealth:{} };
 let selected = "gateway";
 
 async function graphql(query, variables) {
@@ -14,6 +14,7 @@ async function graphql(query, variables) {
 }
 
 const query = `{ systemHealth { status healthy degraded critical unknown } services { name version owner runtime health slo metrics { requestCount requestRate errorRate p50LatencyMs p95LatencyMs p99LatencyMs availability sloCompliance errorBudgetRemaining } } serviceGraph { source destination protocol requestCount errorCount averageLatencyMs lastObserved } incidents { id severity status title suspectedService affectedServices triggerCondition createdAt acknowledgedAt resolvedAt } auditLog { id timestamp actor action resource resourceId metadata } }`;
+const traceQuery = `query Traces($service:String!){ recentTraces(service:$service) { traceId startTime durationMs services spans { spanId parentSpanId service operation durationMs error } } }`;
 const fmt = (value, digits=1) => Number(value || 0).toFixed(digits);
 const pct = (value) => `${fmt(value * 100, 2)}%`;
 const healthClass = (value) => (value || "UNKNOWN").toLowerCase();
@@ -35,7 +36,7 @@ function renderTopology() {
   const edges = state.serviceGraph.map((edge) => { const a=positions[edge.source], b=positions[edge.destination]; if(!a||!b)return ""; const on=active.has(edge.source)&&active.has(edge.destination); return `<line class="edge ${edge.errorCount ? "error":""} ${on ? "related":""}" x1="${a[0]+70}" y1="${a[1]}" x2="${b[0]-70}" y2="${b[1]}" marker-end="url(#arrow)"><title>${safe(edge.protocol)} · ${edge.requestCount} requests · ${fmt(edge.averageLatencyMs)} ms</title></line>`; }).join("");
   const nodes = state.services.map((service,index) => { const p=positions[service.name]||[120+index*90,380], on=active.has(service.name); return `<g class="node ${healthClass(service.health)} ${service.name===selected?"selected":""} ${blast&&!on?"dim":on?"related":""}" data-service="${safe(service.name)}" transform="translate(${p[0]-70} ${p[1]-25})"><rect width="140" height="50"/><circle cx="14" cy="15" r="5"/><text x="26" y="19">${safe(service.name)}</text><text class="sub" x="14" y="37">${service.metrics.requestCount} req · ${fmt(service.metrics.p95LatencyMs)} ms p95</text></g>`; }).join("");
   svg.innerHTML = marker+edges+nodes;
-  svg.querySelectorAll(".node").forEach((node) => node.addEventListener("click", () => { selected=node.dataset.service; render(); }));
+  svg.querySelectorAll(".node").forEach((node) => node.addEventListener("click", () => { selected=node.dataset.service; state.recentTraces=[]; render(); live.refresh(); }));
 }
 
 function renderDetail() {
@@ -48,12 +49,14 @@ function renderDetail() {
   const reverse=state.serviceGraph.filter((edge)=>edge.destination===selected).map((edge)=>edge.source);
   $("#service-detail").className="";
   $("#service-detail").innerHTML=`<div class="metrics-grid"><div class="metric"><span>Request rate</span><strong>${fmt(service.metrics.requestRate,2)}/s</strong></div><div class="metric"><span>Error rate</span><strong>${pct(service.metrics.errorRate)}</strong></div><div class="metric"><span>P50 latency</span><strong>${fmt(service.metrics.p50LatencyMs)} ms</strong></div><div class="metric"><span>P95 latency</span><strong>${fmt(service.metrics.p95LatencyMs)} ms</strong></div><div class="metric"><span>Availability</span><strong>${pct(service.metrics.availability)}</strong></div><div class="metric"><span>Error budget</span><strong>${pct(service.metrics.errorBudgetRemaining)}</strong></div></div><div class="relations"><p><b>Runtime</b> ${safe(service.runtime)} · ${safe(service.version)}</p><p><b>Depends on</b> ${direct.map(safe).join(", ")||"none observed"}</p><p><b>Called by</b> ${reverse.map(safe).join(", ")||"none observed"}</p></div>`;
+  const traces=state.traceError?`<p class="empty">Trace data unavailable: ${safe(state.traceError)}</p>`:state.recentTraces.length?state.recentTraces.map((trace)=>`<details class="trace"><summary><b>${safe(trace.traceId.slice(-8))}</b><span>${fmt(trace.durationMs)} ms · ${trace.services.map(safe).join(", ")}</span></summary>${trace.spans.map((span)=>`<p class="${span.error?"trace-error":""}">${span.parentSpanId?"↳":"•"} ${safe(span.service)} · ${safe(span.operation)} <span>${fmt(span.durationMs)} ms</span></p>`).join("")}</details>`).join(""):`<p class="empty">No recent traces for this service.</p>`;
+  $("#service-detail").insertAdjacentHTML("beforeend", `<div class="traces"><h3>Recent distributed traces</h3>${traces}</div>`);
   $("#fault-service").value=service.name;
 }
 
 function renderServices() {
   $("#services").innerHTML=state.services.map((service)=>`<tr data-service="${safe(service.name)}"><td>${safe(service.name)}</td><td><span class="status ${healthClass(service.health)}">${service.health}</span></td><td>${service.metrics.requestCount}</td><td>${fmt(service.metrics.requestRate,2)}/s</td><td>${pct(service.metrics.errorRate)}</td><td>${fmt(service.metrics.p50LatencyMs)} ms</td><td>${fmt(service.metrics.p95LatencyMs)} ms</td><td>${fmt(service.metrics.p99LatencyMs)} ms</td><td>${fmt(service.slo,2)}%</td><td><div class="budget"><i style="width:${service.metrics.errorBudgetRemaining*100}%"></i></div></td></tr>`).join("");
-  $("#services").querySelectorAll("tr").forEach((row)=>row.addEventListener("click",()=>{selected=row.dataset.service;render();}));
+  $("#services").querySelectorAll("tr").forEach((row)=>row.addEventListener("click",()=>{selected=row.dataset.service;state.recentTraces=[];render();live.refresh();}));
 }
 
 function renderFeeds() {
@@ -75,7 +78,7 @@ function renderSummary() {
 }
 
 function render(){renderSummary();renderTopology();renderDetail();renderServices();renderFeeds();}
-async function refresh(){state=await graphql(query);render();}
+async function refresh(){const service=selected,next=await graphql(query);try{next.recentTraces=(await graphql(traceQuery,{service})).recentTraces;next.traceError=null;}catch(error){next.recentTraces=[];next.traceError=error.message;}if(service!==selected)return;state=next;render();}
 async function mutate(document,variables,message){try{await graphql(document,variables);toast(message);live.refresh();}catch(error){toast(error.message,true);}}
 function toast(message,error=false){const node=$("#toast");node.textContent=message;node.className=`show ${error?"error":""}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.className="",2600);}
 

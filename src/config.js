@@ -20,4 +20,5 @@ export const config = {
   adminToken: process.env.ADMIN_TOKEN,
   authTokens: process.env.AUTH_TOKENS,
   databaseUrl: process.env.DATABASE_URL,
+  jaegerQueryUrl: process.env.JAEGER_QUERY_URL,
 };
