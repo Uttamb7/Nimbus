@@ -16,6 +16,34 @@ test("history preserves incident lifecycle and append-only audit records", async
   assert.equal(await history.createIncident({ ...incident, id: "ae5cc18f-8fa1-42d9-9c53-5ac7da820983" }), null);
 });
 
+test("history persists and maps incident evidence", async () => {
+  let parameters;
+  const row = {
+    id: "incident", severity: "SEV2", status: "OPEN", title: "Failure",
+    suspected_service: "gateway", affected_services: ["gateway", "orders"],
+    trigger_condition: "error rate", evidence: { requestCount: 7, errorRate: 1 },
+    created_at: "2026-09-05T12:00:00.000Z",
+  };
+  const history = new History({ pool: { query: async (sql, values) => {
+    assert.match(sql, /affected_services/);
+    parameters = values;
+    return { rows: [row] };
+  } } });
+
+  const incident = await history.createIncident({
+    id: row.id, severity: row.severity, status: row.status, title: row.title,
+    suspectedService: row.suspected_service, affectedServices: row.affected_services,
+    triggerCondition: row.trigger_condition, evidence: row.evidence,
+    createdAt: row.created_at,
+  });
+
+  assert.deepEqual(incident.affectedServices, ["gateway", "orders"]);
+  assert.deepEqual(incident.evidence, { requestCount: 7, errorRate: 1 });
+  assert.deepEqual(parameters.slice(5, 8), [
+    ["gateway", "orders"], "error rate", '{"requestCount":7,"errorRate":1}',
+  ]);
+});
+
 test("recovery resolution publishes the incident and audit together", async () => {
   const history = new History();
   const incidents = history.events.subscribe("incidentChanged");

@@ -218,9 +218,11 @@ try {
     assert.equal(response.status, 202);
   }
 
-  const beforeRestart = await graphql("{ incidents { id status suspectedService createdAt } }");
+  const beforeRestart = await graphql("{ incidents { id status suspectedService affectedServices createdAt evidence { requestCount errorRate p95LatencyMs availability } } }");
   const incident = beforeRestart.incidents.find((value) => value.status === "OPEN" && value.suspectedService === "inventory-api");
   assert.ok(incident);
+  assert.deepEqual(incident.affectedServices, ["inventory-api", "identity-api"]);
+  assert.deepEqual(incident.evidence, { requestCount: 7, errorRate: 1, p95LatencyMs: 1000, availability: 0 });
   await graphql("mutation($id: ID!) { acknowledgeIncident(id: $id) { action resourceId } }", { id: incident.id }, "local-operator");
   await graphql("mutation($id: ID!) { resolveIncident(id: $id) { action resourceId } }", { id: incident.id }, "local-operator");
 
@@ -246,8 +248,8 @@ try {
   const reconnected = await subscribeUpdates();
   reconnected.socket.close();
 
-  const persisted = await graphql("{ incidents { id status createdAt acknowledgedAt resolvedAt } auditLog { action resourceId } }");
-  assert.ok(persisted.incidents.some((value) => value.id === incident.id && value.status === "RESOLVED" && value.createdAt === incident.createdAt && value.acknowledgedAt && value.resolvedAt));
+  const persisted = await graphql("{ incidents { id status affectedServices createdAt acknowledgedAt resolvedAt evidence { requestCount errorRate p95LatencyMs availability } } auditLog { action resourceId } }");
+  assert.ok(persisted.incidents.some((value) => value.id === incident.id && value.status === "RESOLVED" && value.createdAt === incident.createdAt && value.acknowledgedAt && value.resolvedAt && JSON.stringify(value.affectedServices) === JSON.stringify(incident.affectedServices) && JSON.stringify(value.evidence) === JSON.stringify(incident.evidence)));
   assert.ok(persisted.auditLog.some((value) => value.action === "incident.acknowledged" && value.resourceId === incident.id));
   assert.ok(persisted.auditLog.some((value) => value.action === "incident.resolved" && value.resourceId === incident.id));
   console.log(`checkout ${order.orderId}: ${traceServices.length} services traced through broker recovery, duplicate suppressed, dead letter retained; ${edges.length} observed edges; incident ${incident.id} streamed and survived restart; subscriptions re-established`);

@@ -9,7 +9,7 @@ test("measured failures consume budget and create one incident", async () => {
   const observation = { source: "gateway", status: 500, durationMs: 900 };
   await operations.observe(observation);
   await operations.observe(observation);
-  await operations.observe(observation);
+  await operations.observe(observation, { affectedServices: ["gateway", "orders", "inventory"] });
   await operations.observe(observation);
   const metrics = operations.metrics("gateway");
   assert.equal(metrics.requestCount, 4);
@@ -20,6 +20,11 @@ test("measured failures consume budget and create one incident", async () => {
   const incidents = await operations.incidents();
   assert.equal(incidents.length, 1);
   assert.match(incidents[0].triggerCondition, /p95 latency/);
+  assert.deepEqual(incidents[0].affectedServices, ["gateway", "orders", "inventory"]);
+  assert.deepEqual(incidents[0].evidence, {
+    requestCount: 3, errorRate: 1, p50LatencyMs: 900, p95LatencyMs: 900,
+    p99LatencyMs: 900, availability: 0,
+  });
 });
 
 test("sustained measured recovery resolves an incident exactly once", async () => {

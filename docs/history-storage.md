@@ -1,6 +1,6 @@
 # History storage
 
-Nimbus stores incidents, audit events, orders, producer outbox state, and per-consumer event receipts in the local PostgreSQL container. RabbitMQ retains queued and dead-lettered messages in its own named volume. Telemetry samples, calculated service health, and observed topology remain bounded in process memory and reset when their container restarts.
+Nimbus stores incidents, their detection-time metric and affected-service snapshots, audit events, orders, producer outbox state, and per-consumer event receipts in the local PostgreSQL container. Later telemetry and topology changes do not rewrite incident evidence. RabbitMQ retains queued and dead-lettered messages in its own named volume. Live telemetry samples, calculated service health, and observed topology remain bounded in process memory and reset when their container restarts.
 
 `docker compose up --build` starts PostgreSQL and applies any unapplied files in `migrations/` before the control plane listens. Applied versions are recorded in `schema_migrations`, so restarting the control plane safely reruns the migration check.
 

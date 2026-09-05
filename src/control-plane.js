@@ -34,7 +34,9 @@ async function route(request, response) {
   if (url.pathname === "/observe" && request.method === "POST") {
     const observation = await body(request);
     const edge = topology.observe(observation);
-    const incident = await operations.observe(observation);
+    const incident = await operations.observe(observation, {
+      affectedServices: [observation.source, ...topology.downstream(observation.source)],
+    });
     return send(response, 202, { edge, incident });
   }
   if (url.pathname === "/graphql" && request.method === "POST") {

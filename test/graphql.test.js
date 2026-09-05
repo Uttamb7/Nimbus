@@ -23,3 +23,24 @@ test("GraphQL exposes traces to viewers", async () => {
   const result = await graphql({ schema, source: `{ recentTraces(service: "gateway", limit: 2) { traceId services } }`, rootValue: root(new Topology(), new Operations(), undefined, { role: "viewer", actor: "Reader" }, traces) });
   assert.deepEqual(JSON.parse(JSON.stringify(result.data.recentTraces)), [{ traceId: "trace", services: ["gateway"] }]);
 });
+
+test("GraphQL exposes the stored incident snapshot", async () => {
+  const topology = new Topology();
+  const operations = new Operations({ minSamples: 1, consecutiveWindows: 1 });
+  await operations.observe(
+    { source: "gateway", destination: "orders", status: 503, durationMs: 900 },
+    { affectedServices: ["gateway", "orders"] },
+  );
+  topology.observe({ source: "gateway", destination: "later", status: 200, durationMs: 1 });
+
+  const result = await graphql({
+    schema,
+    source: "{ incidents { affectedServices evidence { requestCount errorRate p95LatencyMs availability } } }",
+    rootValue: root(topology, operations),
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [{
+    affectedServices: ["gateway", "orders"],
+    evidence: { requestCount: 1, errorRate: 1, p95LatencyMs: 900, availability: 0 },
+  }]);
+});

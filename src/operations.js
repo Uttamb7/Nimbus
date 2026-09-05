@@ -12,7 +12,7 @@ export class Operations {
     Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, now, history });
   }
 
-  observe(observation) {
+  observe(observation, { affectedServices = [observation.source] } = {}) {
     const samples = this.#samples.get(observation.source) || [];
     samples.push({ status: observation.status, durationMs: observation.durationMs, at: this.now() });
     if (samples.length > 100) samples.shift();
@@ -27,7 +27,17 @@ export class Operations {
     if (count >= this.consecutiveWindows) {
       this.#recoveries.set(observation.source, 0);
       const reason = metrics.p95LatencyMs > this.p95LimitMs ? `p95 latency exceeded ${this.p95LimitMs} ms` : `error rate exceeded ${this.errorRateLimit * 100}%`;
-      const incident = { id: randomUUID(), severity: "SEV2", status: "OPEN", title: `${observation.source} is unhealthy`, suspectedService: observation.source, triggerCondition: reason, createdAt: new Date(this.now()).toISOString(), acknowledgedAt: null, resolvedAt: null };
+      const incident = {
+        id: randomUUID(), severity: "SEV2", status: "OPEN",
+        title: `${observation.source} is unhealthy`, suspectedService: observation.source,
+        affectedServices: [...affectedServices], triggerCondition: reason,
+        evidence: {
+          requestCount: metrics.requestCount, errorRate: metrics.errorRate,
+          p50LatencyMs: metrics.p50LatencyMs, p95LatencyMs: metrics.p95LatencyMs,
+          p99LatencyMs: metrics.p99LatencyMs, availability: metrics.availability,
+        },
+        createdAt: new Date(this.now()).toISOString(), acknowledgedAt: null, resolvedAt: null,
+      };
       return this.history.createIncident(incident);
     }
     if (this.#recoveries.get(observation.source) >= this.recoveryWindows) {

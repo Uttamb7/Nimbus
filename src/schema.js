@@ -8,7 +8,8 @@ export const schema = buildSchema(`
   type ServiceMetrics { requestCount: Int!, requestRate: Float!, errorRate: Float!, p50LatencyMs: Float!, p95LatencyMs: Float!, p99LatencyMs: Float!, availability: Float!, sloCompliance: Boolean!, errorBudgetRemaining: Float! }
   type Service { id: ID!, name: String!, version: String!, owner: String!, runtime: String!, health: HealthStatus!, slo: Float!, metrics: ServiceMetrics! }
   type GraphEdge { source: String!, destination: String!, protocol: String!, requestCount: Int!, errorCount: Int!, averageLatencyMs: Float!, lastObserved: String! }
-  type Incident { id: ID!, severity: Severity!, status: IncidentStatus!, title: String!, suspectedService: String!, affectedServices: [String!]!, triggerCondition: String!, createdAt: String!, acknowledgedAt: String, resolvedAt: String }
+  type IncidentEvidence { requestCount: Int, errorRate: Float, p50LatencyMs: Float, p95LatencyMs: Float, p99LatencyMs: Float, availability: Float }
+  type Incident { id: ID!, severity: Severity!, status: IncidentStatus!, title: String!, suspectedService: String!, affectedServices: [String!]!, triggerCondition: String!, evidence: IncidentEvidence!, createdAt: String!, acknowledgedAt: String, resolvedAt: String }
   type SystemHealth { status: HealthStatus!, healthy: Int!, degraded: Int!, critical: Int!, unknown: Int! }
   type AuditEvent { id: ID!, timestamp: String!, actor: String!, action: String!, resource: String!, resourceId: String!, metadata: String! }
   type TraceSpan { spanId: ID!, parentSpanId: ID, service: String!, operation: String!, startTime: String!, durationMs: Float!, error: Boolean! }
@@ -21,7 +22,7 @@ export const schema = buildSchema(`
 const names = ["gateway", "identity-api", "inventory-api", "order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"];
 
 const serviceValue = (name, metrics, operations) => ({ id: name, name, version: "0.1.0", owner: "Uttam Bhattarai", runtime: "Node.js 22", health: metrics.health, slo: operations.availabilityTarget * 100, metrics });
-const incidentValue = (value, topology) => ({ ...value, affectedServices: [value.suspectedService, ...topology.downstream(value.suspectedService)] });
+const incidentValue = (value) => ({ ...value, affectedServices: value.affectedServices || [value.suspectedService], evidence: value.evidence || {} });
 const subscriptions = schema.getSubscriptionType().getFields();
 for (const [field, definition] of Object.entries(subscriptions)) {
   definition.subscribe = (_, args, context) => {
@@ -30,11 +31,11 @@ for (const [field, definition] of Object.entries(subscriptions)) {
   };
 }
 subscriptions.serviceHealthChanged.resolve = (event, args, { operations }) => event.serviceHealthChanged && serviceValue(event.serviceHealthChanged.name, event.serviceHealthChanged.metrics, operations);
-subscriptions.incidentChanged.resolve = (event, args, { topology }) => event.incidentChanged && incidentValue(event.incidentChanged, topology);
+subscriptions.incidentChanged.resolve = (event) => event.incidentChanged && incidentValue(event.incidentChanged);
 
 export function root(topology, operations, actions, identity = { role: "viewer", actor: "viewer" }, traces) {
   const service = (name) => serviceValue(name, operations.metrics(name), operations);
-  const incident = (value) => incidentValue(value, topology);
+  const incident = (value) => incidentValue(value);
   return {
     services: () => names.map(service),
     serviceGraph: () => topology.edges(),
