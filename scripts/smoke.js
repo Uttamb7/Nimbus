@@ -209,6 +209,14 @@ assert.ok(edges.every((edge) => edge.requestCount > 0 && edge.averageLatencyMs >
 
 const updates = await subscribeUpdates();
 try {
+  for (let index = 0; index < 5; index++) {
+    const response = await fetch("http://127.0.0.1:4000/observe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: "inventory-api", destination: "identity-api", status: 200, durationMs: 10 }),
+    });
+    assert.equal(response.status, 202);
+  }
   for (let index = 0; index < 7; index++) {
     const response = await fetch("http://127.0.0.1:4000/observe", {
       method: "POST",
@@ -218,11 +226,12 @@ try {
     assert.equal(response.status, 202);
   }
 
-  const beforeRestart = await graphql("{ incidents { id status suspectedService affectedServices createdAt evidence { requestCount errorRate p95LatencyMs availability } } }");
+  const beforeRestart = await graphql("{ incidents { id status suspectedService affectedServices createdAt evidence { requestCount errorRate p95LatencyMs availability } baseline { requestCount errorRate p95LatencyMs availability } } }");
   const incident = beforeRestart.incidents.find((value) => value.status === "OPEN" && value.suspectedService === "inventory-api");
   assert.ok(incident);
   assert.deepEqual(incident.affectedServices, ["inventory-api", "identity-api"]);
-  assert.deepEqual(incident.evidence, { requestCount: 7, errorRate: 1, p95LatencyMs: 1000, availability: 0 });
+  assert.deepEqual(incident.evidence, { requestCount: 8, errorRate: 0.375, p95LatencyMs: 1000, availability: 0.625 });
+  assert.deepEqual(incident.baseline, { requestCount: 5, errorRate: 0, p95LatencyMs: 10, availability: 1 });
   await graphql("mutation($id: ID!) { acknowledgeIncident(id: $id) { action resourceId } }", { id: incident.id }, "local-operator");
   await graphql("mutation($id: ID!) { resolveIncident(id: $id) { action resourceId } }", { id: incident.id }, "local-operator");
 
@@ -248,8 +257,8 @@ try {
   const reconnected = await subscribeUpdates();
   reconnected.socket.close();
 
-  const persisted = await graphql("{ incidents { id status affectedServices createdAt acknowledgedAt resolvedAt evidence { requestCount errorRate p95LatencyMs availability } } auditLog { action resourceId } }");
-  assert.ok(persisted.incidents.some((value) => value.id === incident.id && value.status === "RESOLVED" && value.createdAt === incident.createdAt && value.acknowledgedAt && value.resolvedAt && JSON.stringify(value.affectedServices) === JSON.stringify(incident.affectedServices) && JSON.stringify(value.evidence) === JSON.stringify(incident.evidence)));
+  const persisted = await graphql("{ incidents { id status affectedServices createdAt acknowledgedAt resolvedAt evidence { requestCount errorRate p95LatencyMs availability } baseline { requestCount errorRate p95LatencyMs availability } } auditLog { action resourceId } }");
+  assert.ok(persisted.incidents.some((value) => value.id === incident.id && value.status === "RESOLVED" && value.createdAt === incident.createdAt && value.acknowledgedAt && value.resolvedAt && JSON.stringify(value.affectedServices) === JSON.stringify(incident.affectedServices) && JSON.stringify(value.evidence) === JSON.stringify(incident.evidence) && JSON.stringify(value.baseline) === JSON.stringify(incident.baseline)));
   assert.ok(persisted.auditLog.some((value) => value.action === "incident.acknowledged" && value.resourceId === incident.id));
   assert.ok(persisted.auditLog.some((value) => value.action === "incident.resolved" && value.resourceId === incident.id));
   console.log(`checkout ${order.orderId}: ${traceServices.length} services traced through broker recovery, duplicate suppressed, dead letter retained; ${edges.length} observed edges; incident ${incident.id} streamed and survived restart; subscriptions re-established`);

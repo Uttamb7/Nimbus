@@ -8,5 +8,6 @@ test("console assets use live GraphQL data", async () => {
   assert.match(script, /serviceGraph/);
   assert.match(script, /injectFailure/);
   assert.match(script, /recentTraces/);
+  assert.match(script, /Healthy baseline/);
   assert.match(styles, /--critical/);
 });

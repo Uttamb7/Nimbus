@@ -19,7 +19,7 @@ Each service emits HTTP and RabbitMQ spans through a health-checked local OpenTe
 
 The production API uses the standards-compliant `graphql` package. `POST /graphql` currently exposes the service catalog, observed graph, and BFS shortest paths.
 
-The operations engine retains the latest 100 measured outbound calls per service. It calculates request rate, error rate, latency percentiles, availability, SLO compliance, and remaining error budget. Repeated threshold violations create a single active incident and capture that evaluation window plus the currently observed downstream blast radius for later investigation.
+The operations engine retains the latest 100 measured outbound calls per service. It calculates request rate, error rate, latency percentiles, availability, SLO compliance, and remaining error budget. Repeated threshold violations create a single active incident and capture that evaluation window, the last measured threshold-compliant window when one exists, and the currently observed downstream blast radius for later investigation.
 
 Local-demo mutations can inject or restore bounded service faults and acknowledge or resolve incidents. Each mutation appends an immutable audit event; fault endpoints require the internal demo token and are inactive unless `DEMO_MODE=true`.
 

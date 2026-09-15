@@ -44,3 +44,20 @@ test("GraphQL exposes the stored incident snapshot", async () => {
     evidence: { requestCount: 1, errorRate: 1, p95LatencyMs: 900, availability: 0 },
   }]);
 });
+
+test("GraphQL exposes the measured incident baseline", async () => {
+  const operations = new Operations({ minSamples: 2, consecutiveWindows: 1, errorRateLimit: 0.2 });
+  await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  await operations.observe({ source: "gateway", status: 200, durationMs: 20 });
+  await operations.observe({ source: "gateway", status: 503, durationMs: 900 });
+
+  const result = await graphql({
+    schema,
+    source: "{ incidents { baseline { requestCount errorRate p95LatencyMs availability } } }",
+    rootValue: root(new Topology(), operations),
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [{
+    baseline: { requestCount: 2, errorRate: 0, p95LatencyMs: 20, availability: 1 },
+  }]);
+});

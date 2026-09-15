@@ -14,6 +14,7 @@ const incidentFromRow = (row) => ({
   affectedServices: row.affected_services || [row.suspected_service],
   triggerCondition: row.trigger_condition,
   evidence: row.evidence || {},
+  baseline: row.baseline || null,
   createdAt: iso(row.created_at),
   acknowledgedAt: iso(row.acknowledged_at),
   resolvedAt: iso(row.resolved_at),
@@ -49,10 +50,10 @@ export class History {
       return { ...incident };
     }
     const result = await this.pool.query(
-      `INSERT INTO incidents (id, severity, status, title, suspected_service, affected_services, trigger_condition, evidence, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+      `INSERT INTO incidents (id, severity, status, title, suspected_service, affected_services, trigger_condition, evidence, baseline, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10)
        ON CONFLICT DO NOTHING RETURNING *`,
-      [incident.id, incident.severity, incident.status, incident.title, incident.suspectedService, incident.affectedServices, incident.triggerCondition, JSON.stringify(incident.evidence), incident.createdAt],
+      [incident.id, incident.severity, incident.status, incident.title, incident.suspectedService, incident.affectedServices, incident.triggerCondition, JSON.stringify(incident.evidence), incident.baseline ? JSON.stringify(incident.baseline) : null, incident.createdAt],
     );
     const created = result.rows[0] ? incidentFromRow(result.rows[0]) : null;
     if (created) this.events.publish("incidentChanged", created);

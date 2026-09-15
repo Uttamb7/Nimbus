@@ -22,6 +22,7 @@ test("history persists and maps incident evidence", async () => {
     id: "incident", severity: "SEV2", status: "OPEN", title: "Failure",
     suspected_service: "gateway", affected_services: ["gateway", "orders"],
     trigger_condition: "error rate", evidence: { requestCount: 7, errorRate: 1 },
+    baseline: { requestCount: 5, errorRate: 0 },
     created_at: "2026-09-05T12:00:00.000Z",
   };
   const history = new History({ pool: { query: async (sql, values) => {
@@ -33,15 +34,17 @@ test("history persists and maps incident evidence", async () => {
   const incident = await history.createIncident({
     id: row.id, severity: row.severity, status: row.status, title: row.title,
     suspectedService: row.suspected_service, affectedServices: row.affected_services,
-    triggerCondition: row.trigger_condition, evidence: row.evidence,
+    triggerCondition: row.trigger_condition, evidence: row.evidence, baseline: row.baseline,
     createdAt: row.created_at,
   });
 
   assert.deepEqual(incident.affectedServices, ["gateway", "orders"]);
   assert.deepEqual(incident.evidence, { requestCount: 7, errorRate: 1 });
+  assert.deepEqual(incident.baseline, { requestCount: 5, errorRate: 0 });
   assert.deepEqual(parameters.slice(5, 8), [
     ["gateway", "orders"], "error rate", '{"requestCount":7,"errorRate":1}',
   ]);
+  assert.equal(parameters[8], '{"requestCount":5,"errorRate":0}');
 });
 
 test("recovery resolution publishes the incident and audit together", async () => {

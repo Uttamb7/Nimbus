@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { History } from "./history.js";
 
 const percentile = (values, fraction) => values.length ? values[Math.max(0, Math.ceil(values.length * fraction) - 1)] : 0;
+const evidence = ({ requestCount, errorRate, p50LatencyMs, p95LatencyMs, p99LatencyMs, availability }) => ({ requestCount, errorRate, p50LatencyMs, p95LatencyMs, p99LatencyMs, availability });
 
 export class Operations {
   #samples = new Map();
   #violations = new Map();
   #recoveries = new Map();
+  #baselines = new Map();
 
   constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, now = () => Date.now(), history = new History() } = {}) {
     Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, now, history });
@@ -21,6 +23,7 @@ export class Operations {
     const metrics = this.metrics(observation.source);
     this.history.events.publish("serviceHealthChanged", { name: observation.source, metrics });
     const violated = metrics.requestCount >= this.minSamples && (metrics.p95LatencyMs > this.p95LimitMs || metrics.errorRate > this.errorRateLimit);
+    if (!violated && metrics.requestCount >= this.minSamples) this.#baselines.set(observation.source, evidence(metrics));
     const count = violated ? (this.#violations.get(observation.source) || 0) + 1 : 0;
     this.#violations.set(observation.source, count);
     this.#recoveries.set(observation.source, !violated && metrics.requestCount >= this.minSamples ? (this.#recoveries.get(observation.source) || 0) + 1 : 0);
@@ -31,11 +34,7 @@ export class Operations {
         id: randomUUID(), severity: "SEV2", status: "OPEN",
         title: `${observation.source} is unhealthy`, suspectedService: observation.source,
         affectedServices: [...affectedServices], triggerCondition: reason,
-        evidence: {
-          requestCount: metrics.requestCount, errorRate: metrics.errorRate,
-          p50LatencyMs: metrics.p50LatencyMs, p95LatencyMs: metrics.p95LatencyMs,
-          p99LatencyMs: metrics.p99LatencyMs, availability: metrics.availability,
-        },
+        evidence: evidence(metrics), baseline: this.#baselines.get(observation.source) || null,
         createdAt: new Date(this.now()).toISOString(), acknowledgedAt: null, resolvedAt: null,
       };
       return this.history.createIncident(incident);

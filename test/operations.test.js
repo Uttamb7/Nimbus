@@ -25,6 +25,27 @@ test("measured failures consume budget and create one incident", async () => {
     requestCount: 3, errorRate: 1, p50LatencyMs: 900, p95LatencyMs: 900,
     p99LatencyMs: 900, availability: 0,
   });
+  assert.equal(incidents[0].baseline, null);
+});
+
+test("incident captures the last measured compliant window", async () => {
+  const operations = new Operations({ minSamples: 2, consecutiveWindows: 2, errorRateLimit: 0.2 });
+  for (let index = 0; index < 2; index++) {
+    await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  }
+  for (let index = 0; index < 2; index++) {
+    await operations.observe({ source: "gateway", status: 500, durationMs: 900 });
+  }
+
+  const incident = (await operations.incidents())[0];
+  assert.deepEqual(incident.baseline, {
+    requestCount: 2, errorRate: 0, p50LatencyMs: 10, p95LatencyMs: 10,
+    p99LatencyMs: 10, availability: 1,
+  });
+  assert.deepEqual(incident.evidence, {
+    requestCount: 4, errorRate: 0.5, p50LatencyMs: 10, p95LatencyMs: 900,
+    p99LatencyMs: 900, availability: 0.5,
+  });
 });
 
 test("sustained measured recovery resolves an incident exactly once", async () => {
