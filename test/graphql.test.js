@@ -24,6 +24,36 @@ test("GraphQL exposes traces to viewers", async () => {
   assert.deepEqual(JSON.parse(JSON.stringify(result.data.recentTraces)), [{ traceId: "trace", services: ["gateway"] }]);
 });
 
+test("GraphQL scopes incident traces to stored evidence time", async () => {
+  const operations = new Operations({ minSamples: 1, consecutiveWindows: 1, now: () => Date.parse("2023-11-14T22:13:20.000Z") });
+  await operations.observe({ source: "gateway", status: 503, durationMs: 900 });
+  const [incident] = await operations.incidents();
+  const expected = [{ traceId: "trace", services: ["gateway"], spans: [] }];
+  const searches = [];
+  const traces = { search: async (input) => {
+    searches.push(input);
+    return expected;
+  } };
+  const rootValue = root(new Topology(), operations, undefined, { role: "viewer", actor: "Reader" }, traces, () => new Date("2023-11-14T22:14:20.000Z"));
+  const result = await graphql({ schema, source: `query($id:ID!){ incidentTraces(id:$id,limit:2){ traceId services } }`, variableValues: { id: incident.id }, rootValue });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidentTraces)), [{ traceId: "trace", services: ["gateway"] }]);
+  assert.deepEqual(searches[0], {
+    service: "gateway",
+    limit: 2,
+    startTime: "2023-11-14T22:08:20.000Z",
+    endTime: "2023-11-14T22:14:20.000Z",
+  });
+
+  await operations.resolve(incident.id);
+  await graphql({ schema, source: `query($id:ID!){ incidentTraces(id:$id,limit:2){ traceId } }`, variableValues: { id: incident.id }, rootValue });
+  assert.equal(searches[1].endTime, incident.createdAt);
+
+  const missing = await graphql({ schema, source: `{ incidentTraces(id:"missing"){ traceId } }`, rootValue });
+  assert.match(missing.errors[0].message, /unknown incident/);
+  const unauthorized = await graphql({ schema, source: `{ incidentTraces(id:"${incident.id}"){ traceId } }`, rootValue: root(new Topology(), operations, undefined, null, traces) });
+  assert.match(unauthorized.errors[0].message, /viewer role required/);
+});
+
 test("GraphQL exposes the stored incident snapshot", async () => {
   const topology = new Topology();
   const operations = new Operations({ minSamples: 1, consecutiveWindows: 1 });

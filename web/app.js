@@ -1,9 +1,10 @@
 import { connectLive } from "./live.js";
+import { fmt, safe, traceList } from "./trace-view.js";
 
 const $ = (selector) => document.querySelector(selector);
 const endpoint = "/graphql";
 const positions = { gateway:[90,205], "identity-api":[315,95], "order-orchestrator":[315,285], "inventory-api":[565,205], "payment-worker":[735,105], "notification-router":[735,215], "analytics-ingestor":[735,325] };
-let state = { services:[], serviceGraph:[], incidents:[], auditLog:[], recentTraces:[], traceError:null, systemHealth:{} };
+let state = { services:[], serviceGraph:[], incidents:[], auditLog:[], recentTraces:[], traceError:null, incidentTrace:null, systemHealth:{} };
 let selected = "gateway";
 
 async function graphql(query, variables) {
@@ -15,10 +16,9 @@ async function graphql(query, variables) {
 
 const query = `{ systemHealth { status healthy degraded critical unknown } services { name version owner runtime health slo metrics { requestCount requestRate errorRate p50LatencyMs p95LatencyMs p99LatencyMs availability sloCompliance errorBudgetRemaining } } serviceGraph { source destination protocol requestCount errorCount averageLatencyMs lastObserved } incidents { id severity status title suspectedService affectedServices triggerCondition evidence { requestCount errorRate p50LatencyMs p95LatencyMs p99LatencyMs availability } baseline { requestCount errorRate p50LatencyMs p95LatencyMs p99LatencyMs availability } createdAt acknowledgedAt resolvedAt } auditLog { id timestamp actor action resource resourceId metadata } }`;
 const traceQuery = `query Traces($service:String!){ recentTraces(service:$service) { traceId startTime durationMs services spans { spanId parentSpanId service operation durationMs error } } }`;
-const fmt = (value, digits=1) => Number(value || 0).toFixed(digits);
+const incidentTraceQuery = `query IncidentTraces($id:ID!){ incidentTraces(id:$id) { traceId startTime durationMs services spans { spanId parentSpanId service operation durationMs error } } }`;
 const pct = (value) => `${fmt(value * 100, 2)}%`;
 const healthClass = (value) => (value || "UNKNOWN").toLowerCase();
-const safe = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[character]);
 
 function related(service) {
   const upstream = new Set(), downstream = new Set(), queue = [service];
@@ -49,7 +49,7 @@ function renderDetail() {
   const reverse=state.serviceGraph.filter((edge)=>edge.destination===selected).map((edge)=>edge.source);
   $("#service-detail").className="";
   $("#service-detail").innerHTML=`<div class="metrics-grid"><div class="metric"><span>Request rate</span><strong>${fmt(service.metrics.requestRate,2)}/s</strong></div><div class="metric"><span>Error rate</span><strong>${pct(service.metrics.errorRate)}</strong></div><div class="metric"><span>P50 latency</span><strong>${fmt(service.metrics.p50LatencyMs)} ms</strong></div><div class="metric"><span>P95 latency</span><strong>${fmt(service.metrics.p95LatencyMs)} ms</strong></div><div class="metric"><span>Availability</span><strong>${pct(service.metrics.availability)}</strong></div><div class="metric"><span>Error budget</span><strong>${pct(service.metrics.errorBudgetRemaining)}</strong></div></div><div class="relations"><p><b>Runtime</b> ${safe(service.runtime)} · ${safe(service.version)}</p><p><b>Depends on</b> ${direct.map(safe).join(", ")||"none observed"}</p><p><b>Called by</b> ${reverse.map(safe).join(", ")||"none observed"}</p></div>`;
-  const traces=state.traceError?`<p class="empty">Trace data unavailable: ${safe(state.traceError)}</p>`:state.recentTraces.length?state.recentTraces.map((trace)=>`<details class="trace"><summary><b>${safe(trace.traceId.slice(-8))}</b><span>${fmt(trace.durationMs)} ms · ${trace.services.map(safe).join(", ")}</span></summary>${trace.spans.map((span)=>`<p class="${span.error?"trace-error":""}">${span.parentSpanId?"↳":"•"} ${safe(span.service)} · ${safe(span.operation)} <span>${fmt(span.durationMs)} ms</span></p>`).join("")}</details>`).join(""):`<p class="empty">No recent traces for this service.</p>`;
+  const traces=traceList(state.recentTraces,state.traceError,{empty:"No recent traces for this service."});
   $("#service-detail").insertAdjacentHTML("beforeend", `<div class="traces"><h3>Recent distributed traces</h3>${traces}</div>`);
   $("#fault-service").value=service.name;
 }
@@ -63,11 +63,12 @@ function renderFeeds() {
   const active=state.incidents.filter((incident)=>incident.status!=="RESOLVED");
   $("#incident-count").textContent=active.length; $("#incident-badge").textContent=active.length;
   $("#incidents").className=`feed ${state.incidents.length?"":"empty"}`;
-  $("#incidents").innerHTML=state.incidents.length?state.incidents.map((incident)=>`<div class="feed-item"><strong><span class="status critical">${incident.severity}</span> ${safe(incident.title)}</strong><time>${new Date(incident.createdAt).toLocaleTimeString()}</time><p>${safe(incident.triggerCondition)} · affected: ${incident.affectedServices.map(safe).join(", ")}</p><p>${incident.evidence.requestCount==null?"Historical incident · no captured metrics":`${incident.evidence.requestCount} requests · ${pct(incident.evidence.errorRate)} errors · ${fmt(incident.evidence.p95LatencyMs)} ms p95 · ${pct(incident.evidence.availability)} available`}</p>${incident.baseline?`<p>Healthy baseline → trigger: ${fmt(incident.baseline.p95LatencyMs)} → ${fmt(incident.evidence.p95LatencyMs)} ms p95 · ${pct(incident.baseline.errorRate)} → ${pct(incident.evidence.errorRate)} errors</p>`:""}${incident.status!=="RESOLVED"?`<div class="feed-actions">${incident.status==="OPEN"?`<button data-ack="${incident.id}">Acknowledge</button>`:""}<button data-resolve="${incident.id}">Resolve</button></div>`:""}</div>`).join(""):"No incidents detected.";
+  $("#incidents").innerHTML=state.incidents.length?state.incidents.map((incident)=>{const investigation=state.incidentTrace?.id===incident.id?`<div class="traces incident-traces"><h3>Related distributed traces</h3>${state.incidentTrace.loading?`<p class="empty">Loading trace evidence…</p>`:traceList(state.incidentTrace.traces,state.incidentTrace.error,{errorPrefix:"Incident trace data unavailable",empty:"No retained traces found for this incident."})}</div>`:"";return `<div class="feed-item"><strong><span class="status critical">${incident.severity}</span> ${safe(incident.title)}</strong><time>${new Date(incident.createdAt).toLocaleTimeString()}</time><p>${safe(incident.triggerCondition)} · affected: ${incident.affectedServices.map(safe).join(", ")}</p><p>${incident.evidence.requestCount==null?"Historical incident · no captured metrics":`${incident.evidence.requestCount} requests · ${pct(incident.evidence.errorRate)} errors · ${fmt(incident.evidence.p95LatencyMs)} ms p95 · ${pct(incident.evidence.availability)} available`}</p>${incident.baseline?`<p>Healthy baseline → trigger: ${fmt(incident.baseline.p95LatencyMs)} → ${fmt(incident.evidence.p95LatencyMs)} ms p95 · ${pct(incident.baseline.errorRate)} → ${pct(incident.evidence.errorRate)} errors</p>`:""}<div class="feed-actions"><button data-traces="${incident.id}">Investigate traces</button>${incident.status!=="RESOLVED"?(incident.status==="OPEN"?`<button data-ack="${incident.id}">Acknowledge</button>`:"")+`<button data-resolve="${incident.id}">Resolve</button>`:""}</div>${investigation}</div>`;}).join(""):"No incidents detected.";
   $("#audit").className=`feed ${state.auditLog.length?"":"empty"}`;
   $("#audit").innerHTML=state.auditLog.length?state.auditLog.map((event)=>`<div class="feed-item"><strong class="audit-action">${safe(event.action)}</strong><time>${new Date(event.timestamp).toLocaleTimeString()}</time><p>${safe(event.actor)} · ${safe(event.resource)}/${safe(event.resourceId)}</p></div>`).join(""):"No operator actions recorded.";
   document.querySelectorAll("[data-ack]").forEach((button)=>button.addEventListener("click",()=>mutate(`mutation($id:ID!){ acknowledgeIncident(id:$id){ id } }`,{id:button.dataset.ack},"Incident acknowledged")));
   document.querySelectorAll("[data-resolve]").forEach((button)=>button.addEventListener("click",()=>mutate(`mutation($id:ID!){ resolveIncident(id:$id){ id } }`,{id:button.dataset.resolve},"Incident resolved")));
+  document.querySelectorAll("[data-traces]").forEach((button)=>button.addEventListener("click",()=>investigate(button.dataset.traces)));
 }
 
 function renderSummary() {
@@ -78,7 +79,8 @@ function renderSummary() {
 }
 
 function render(){renderSummary();renderTopology();renderDetail();renderServices();renderFeeds();}
-async function refresh(){const service=selected,next=await graphql(query);try{next.recentTraces=(await graphql(traceQuery,{service})).recentTraces;next.traceError=null;}catch(error){next.recentTraces=[];next.traceError=error.message;}if(service!==selected)return;state=next;render();}
+async function refresh(){const service=selected,next=await graphql(query);try{next.recentTraces=(await graphql(traceQuery,{service})).recentTraces;next.traceError=null;}catch(error){next.recentTraces=[];next.traceError=error.message;}if(service!==selected)return;next.incidentTrace=state.incidentTrace;state=next;render();}
+async function investigate(id){state.incidentTrace={id,traces:[],error:null,loading:true};renderFeeds();try{state.incidentTrace={id,traces:(await graphql(incidentTraceQuery,{id})).incidentTraces,error:null,loading:false};}catch(error){state.incidentTrace={id,traces:[],error:error.message,loading:false};}renderFeeds();}
 async function mutate(document,variables,message){try{await graphql(document,variables);toast(message);live.refresh();}catch(error){toast(error.message,true);}}
 function toast(message,error=false){const node=$("#toast");node.textContent=message;node.className=`show ${error?"error":""}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.className="",2600);}
 

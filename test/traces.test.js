@@ -31,3 +31,24 @@ test("recent traces validates queries and backend responses", async () => {
   await assert.rejects(new Traces({ baseUrl: "http://jaeger:16686", request: async () => { throw new Error("offline"); } }).recent({ service: "gateway" }), /unavailable: offline/);
   await assert.rejects(new Traces().recent({ service: "gateway" }), /not configured/);
 });
+
+test("trace search sends an exact bounded Jaeger window", async () => {
+  let requested;
+  const traces = new Traces({ baseUrl: "http://jaeger:16686", request: async (url) => {
+    requested = url;
+    return new Response(JSON.stringify({ data: [rawTrace] }));
+  } });
+  await traces.search({
+    service: "gateway",
+    limit: 2,
+    startTime: "2023-11-14T22:08:20.000Z",
+    endTime: "2023-11-14T22:14:20.000Z",
+  });
+  assert.equal(requested.searchParams.get("start"), "1699999700000000");
+  assert.equal(requested.searchParams.get("end"), "1700000060000000");
+  assert.equal(requested.searchParams.get("lookback"), "custom");
+  await assert.rejects(
+    traces.search({ service: "gateway", startTime: "bad", endTime: "2023-11-14T22:14:20.000Z" }),
+    /invalid trace time range/,
+  );
+});

@@ -14,6 +14,10 @@ export class Traces {
   }
 
   async recent({ service, limit = 5 }) {
+    return this.search({ service, limit });
+  }
+
+  async search({ service, limit = 5, startTime, endTime }) {
     if (!services.has(service)) throw new Error("unknown service");
     if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error("trace limit must be 1-20");
     if (!this.baseUrl) throw new Error("trace backend is not configured");
@@ -21,7 +25,18 @@ export class Traces {
     const url = new URL("/api/traces", this.baseUrl);
     url.searchParams.set("service", service);
     url.searchParams.set("limit", String(limit));
-    url.searchParams.set("lookback", "1h");
+    if (startTime || endTime) {
+      const start = new Date(startTime);
+      const end = new Date(endTime);
+      if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end) {
+        throw new Error("invalid trace time range");
+      }
+      url.searchParams.set("start", String(start.getTime() * 1_000));
+      url.searchParams.set("end", String(end.getTime() * 1_000));
+      url.searchParams.set("lookback", "custom");
+    } else {
+      url.searchParams.set("lookback", "1h");
+    }
     let response;
     try {
       response = await this.request(url);

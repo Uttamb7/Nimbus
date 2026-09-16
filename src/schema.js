@@ -14,7 +14,7 @@ export const schema = buildSchema(`
   type AuditEvent { id: ID!, timestamp: String!, actor: String!, action: String!, resource: String!, resourceId: String!, metadata: String! }
   type TraceSpan { spanId: ID!, parentSpanId: ID, service: String!, operation: String!, startTime: String!, durationMs: Float!, error: Boolean! }
   type Trace { traceId: ID!, startTime: String!, durationMs: Float!, services: [String!]!, spans: [TraceSpan!]! }
-  type Query { services: [Service!]!, serviceGraph: [GraphEdge!]!, shortestPath(source: String!, destination: String!): [String!]!, incidents: [Incident!]!, incident(id: ID!): Incident, systemHealth: SystemHealth!, auditLog: [AuditEvent!]!, recentTraces(service: String!, limit: Int = 5): [Trace!]! }
+  type Query { services: [Service!]!, serviceGraph: [GraphEdge!]!, shortestPath(source: String!, destination: String!): [String!]!, incidents: [Incident!]!, incident(id: ID!): Incident, systemHealth: SystemHealth!, auditLog: [AuditEvent!]!, recentTraces(service: String!, limit: Int = 5): [Trace!]!, incidentTraces(id: ID!, limit: Int = 5): [Trace!]! }
   type Mutation { injectFailure(service: String!, status: Int = 503, latencyMs: Int = 0, durationSeconds: Int = 60): AuditEvent!, restoreService(service: String!): AuditEvent!, generateTraffic(count: Int = 1): AuditEvent!, acknowledgeIncident(id: ID!): AuditEvent!, resolveIncident(id: ID!): AuditEvent! }
   type Subscription { serviceHealthChanged: Service, incidentChanged: Incident, auditEventAdded: AuditEvent }
 `);
@@ -33,7 +33,7 @@ for (const [field, definition] of Object.entries(subscriptions)) {
 subscriptions.serviceHealthChanged.resolve = (event, args, { operations }) => event.serviceHealthChanged && serviceValue(event.serviceHealthChanged.name, event.serviceHealthChanged.metrics, operations);
 subscriptions.incidentChanged.resolve = (event) => event.incidentChanged && incidentValue(event.incidentChanged);
 
-export function root(topology, operations, actions, identity = { role: "viewer", actor: "viewer" }, traces) {
+export function root(topology, operations, actions, identity = { role: "viewer", actor: "viewer" }, traces, now = () => new Date()) {
   const service = (name) => serviceValue(name, operations.metrics(name), operations);
   const incident = (value) => incidentValue(value);
   return {
@@ -51,6 +51,18 @@ export function root(topology, operations, actions, identity = { role: "viewer",
     },
     auditLog: () => actions?.auditLog() || [],
     recentTraces: (input) => { requireRole(identity, "viewer"); if (!traces) throw new Error("trace backend is not configured"); return traces.recent(input); },
+    incidentTraces: async ({ id, limit }) => {
+      requireRole(identity, "viewer");
+      if (!traces) throw new Error("trace backend is not configured");
+      const found = (await operations.incidents()).find((value) => value.id === id);
+      if (!found) throw new Error("unknown incident");
+      return traces.search({
+        service: found.suspectedService,
+        limit,
+        startTime: new Date(new Date(found.createdAt).getTime() - 5 * 60_000).toISOString(),
+        endTime: found.resolvedAt || new Date(now()).toISOString(),
+      });
+    },
     injectFailure: (input) => { requireRole(identity, "admin"); return actions.injectFailure(input, identity.actor); },
     restoreService: (input) => { requireRole(identity, "admin"); return actions.restoreService(input, identity.actor); },
     generateTraffic: (input) => { requireRole(identity, "operator"); return actions.generateTraffic(input, identity.actor); },

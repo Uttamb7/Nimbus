@@ -19,7 +19,7 @@ export const history = new History({ connectionString: config.databaseUrl });
 export const operations = new Operations({ history });
 export const actions = new Actions(operations);
 export const traces = new Traces({ baseUrl: config.jaegerQueryUrl });
-const assets = { "/": ["web/index.html", "text/html; charset=utf-8"], "/app.js": ["web/app.js", "text/javascript; charset=utf-8"], "/live.js": ["web/live.js", "text/javascript; charset=utf-8"], "/graphql-ws.js": ["node_modules/graphql-ws/umd/graphql-ws.min.js", "text/javascript; charset=utf-8"], "/styles.css": ["web/styles.css", "text/css; charset=utf-8"] };
+const assets = { "/": ["web/index.html", "text/html; charset=utf-8"], "/app.js": ["web/app.js", "text/javascript; charset=utf-8"], "/live.js": ["web/live.js", "text/javascript; charset=utf-8"], "/trace-view.js": ["web/trace-view.js", "text/javascript; charset=utf-8"], "/graphql-ws.js": ["node_modules/graphql-ws/umd/graphql-ws.min.js", "text/javascript; charset=utf-8"], "/styles.css": ["web/styles.css", "text/css; charset=utf-8"] };
 const rateLimiter = new RateLimiter();
 
 async function route(request, response) {
