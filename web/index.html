@@ -55,6 +55,11 @@
       <div class="table-wrap"><table><thead><tr><th>Service</th><th>State</th><th>Requests</th><th>Rate</th><th>Errors</th><th>P50</th><th>P95</th><th>P99</th><th>SLO</th><th>Budget</th></tr></thead><tbody id="services"></tbody></table></div>
     </section>
 
+    <section class="panel queues-panel">
+      <header><div><p class="eyebrow">EVENT DELIVERY</p><h2>RabbitMQ queues</h2></div><span class="meta">LIVE · NOT PERSISTED</span></header>
+      <div id="queues" class="feed empty">Loading queue state…</div>
+    </section>
+
     <section class="lower-grid">
       <article class="panel">
         <header><div><p class="eyebrow">INCIDENT ENGINE</p><h2>Incident queue</h2></div><span id="incident-badge" class="count">0</span></header>

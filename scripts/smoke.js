@@ -136,11 +136,22 @@ const paymentQueueCount = () => Number(brokerNode(`
   })().catch(() => process.exit(1));
 `));
 await waitFor(paymentQueueCount, (value) => value === 1, "duplicate event was not retained for the stopped consumer");
+const queued = await waitFor(
+  async () => (await graphql("{ eventQueues { name ready unacknowledged consumers } }")).eventQueues.find((queue) => queue.name === "nimbus.payment-worker"),
+  (queue) => queue?.ready === 1 && queue.unacknowledged === 0 && queue.consumers === 0,
+  "control plane did not expose the stopped consumer backlog",
+);
+assert.equal(queued.ready, 1);
 compose(["start", "payment-worker"], { stdio: "inherit" });
 await waitFor(
   paymentQueueCount,
   (value) => value === 0,
   "duplicate event was not acknowledged",
+);
+await waitFor(
+  async () => (await graphql("{ eventQueues { name ready consumers } }")).eventQueues.find((queue) => queue.name === "nimbus.payment-worker"),
+  (queue) => queue?.ready === 0 && queue.consumers === 1,
+  "control plane did not expose the recovered consumer queue",
 );
 await new Promise((resolve) => setTimeout(resolve, 250));
 compose(["stop", "payment-worker"], { stdio: "inherit" });

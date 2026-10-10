@@ -21,4 +21,7 @@ export const config = {
   authTokens: process.env.AUTH_TOKENS,
   databaseUrl: process.env.DATABASE_URL,
   jaegerQueryUrl: process.env.JAEGER_QUERY_URL,
+  rabbitManagementUrl: process.env.RABBITMQ_MANAGEMENT_URL,
+  rabbitManagementUser: process.env.RABBITMQ_MANAGEMENT_USER,
+  rabbitManagementPassword: process.env.RABBITMQ_MANAGEMENT_PASSWORD,
 };

@@ -24,6 +24,14 @@ test("GraphQL exposes traces to viewers", async () => {
   assert.deepEqual(JSON.parse(JSON.stringify(result.data.recentTraces)), [{ traceId: "trace", services: ["gateway"] }]);
 });
 
+test("GraphQL exposes queue state only to viewers", async () => {
+  const queues = { list: async () => [{ name: "nimbus.payment-worker", ready: 2, unacknowledged: 1, consumers: 0 }] };
+  const result = await graphql({ schema, source: "{ eventQueues { name ready unacknowledged consumers } }", rootValue: root(new Topology(), new Operations(), undefined, { role: "viewer", actor: "Reader" }, undefined, undefined, queues) });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.eventQueues)), [{ name: "nimbus.payment-worker", ready: 2, unacknowledged: 1, consumers: 0 }]);
+  const unauthorized = await graphql({ schema, source: "{ eventQueues { name } }", rootValue: root(new Topology(), new Operations(), undefined, null, undefined, undefined, queues) });
+  assert.match(unauthorized.errors[0].message, /viewer role required/);
+});
+
 test("GraphQL scopes incident traces to stored evidence time", async () => {
   const operations = new Operations({ minSamples: 1, consecutiveWindows: 1, now: () => Date.parse("2023-11-14T22:13:20.000Z") });
   await operations.observe({ source: "gateway", status: 503, durationMs: 900 });

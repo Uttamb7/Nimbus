@@ -4,7 +4,7 @@ import { fmt, safe, traceList } from "./trace-view.js";
 const $ = (selector) => document.querySelector(selector);
 const endpoint = "/graphql";
 const positions = { gateway:[90,205], "identity-api":[315,95], "order-orchestrator":[315,285], "inventory-api":[565,205], "payment-worker":[735,105], "notification-router":[735,215], "analytics-ingestor":[735,325] };
-let state = { services:[], serviceGraph:[], incidents:[], auditLog:[], recentTraces:[], traceError:null, incidentTrace:null, systemHealth:{} };
+let state = { services:[], serviceGraph:[], incidents:[], auditLog:[], recentTraces:[], traceError:null, eventQueues:[], queueError:null, incidentTrace:null, systemHealth:{} };
 let selected = "gateway";
 
 async function graphql(query, variables) {
@@ -17,6 +17,7 @@ async function graphql(query, variables) {
 const query = `{ systemHealth { status healthy degraded critical unknown } services { name version owner runtime health slo metrics { requestCount requestRate errorRate p50LatencyMs p95LatencyMs p99LatencyMs availability sloCompliance errorBudgetRemaining } } serviceGraph { source destination protocol requestCount errorCount averageLatencyMs lastObserved } incidents { id severity status title suspectedService affectedServices triggerCondition evidence { requestCount errorRate p50LatencyMs p95LatencyMs p99LatencyMs availability } baseline { requestCount errorRate p50LatencyMs p95LatencyMs p99LatencyMs availability } createdAt acknowledgedAt resolvedAt } auditLog { id timestamp actor action resource resourceId metadata } }`;
 const traceQuery = `query Traces($service:String!){ recentTraces(service:$service) { traceId startTime durationMs services spans { spanId parentSpanId service operation durationMs error } } }`;
 const incidentTraceQuery = `query IncidentTraces($id:ID!){ incidentTraces(id:$id) { traceId startTime durationMs services spans { spanId parentSpanId service operation durationMs error } } }`;
+const queueQuery = `{ eventQueues { name ready unacknowledged consumers } }`;
 const pct = (value) => `${fmt(value * 100, 2)}%`;
 const healthClass = (value) => (value || "UNKNOWN").toLowerCase();
 
@@ -59,6 +60,13 @@ function renderServices() {
   $("#services").querySelectorAll("tr").forEach((row)=>row.addEventListener("click",()=>{selected=row.dataset.service;state.recentTraces=[];render();live.refresh();}));
 }
 
+function renderQueues() {
+  const node=$("#queues");
+  if(state.queueError){node.className="feed empty";node.textContent=`Queue telemetry unavailable: ${state.queueError}`;return;}
+  node.className=`feed ${state.eventQueues.length?"":"empty"}`;
+  node.innerHTML=state.eventQueues.length?state.eventQueues.map((queue)=>`<div class="feed-item"><strong>${safe(queue.name)}</strong><span class="meta">${queue.consumers} consumers</span><p>${queue.ready} ready · ${queue.unacknowledged} unacknowledged</p></div>`).join(""):"No Nimbus queues reported.";
+}
+
 function renderFeeds() {
   const active=state.incidents.filter((incident)=>incident.status!=="RESOLVED");
   $("#incident-count").textContent=active.length; $("#incident-badge").textContent=active.length;
@@ -78,8 +86,8 @@ function renderSummary() {
   $("#request-count").textContent=requests.toLocaleString(); $("#error-rate").textContent=pct(errors); $("#p95").textContent=`${fmt(Math.max(0,...metrics.map((item)=>item.p95LatencyMs)))} ms`;
 }
 
-function render(){renderSummary();renderTopology();renderDetail();renderServices();renderFeeds();}
-async function refresh(){const service=selected,next=await graphql(query);try{next.recentTraces=(await graphql(traceQuery,{service})).recentTraces;next.traceError=null;}catch(error){next.recentTraces=[];next.traceError=error.message;}if(service!==selected)return;next.incidentTrace=state.incidentTrace;state=next;render();}
+function render(){renderSummary();renderTopology();renderDetail();renderServices();renderQueues();renderFeeds();}
+async function refresh(){const service=selected,next=await graphql(query);try{next.recentTraces=(await graphql(traceQuery,{service})).recentTraces;next.traceError=null;}catch(error){next.recentTraces=[];next.traceError=error.message;}try{next.eventQueues=(await graphql(queueQuery)).eventQueues;next.queueError=null;}catch(error){next.eventQueues=[];next.queueError=error.message;}if(service!==selected)return;next.incidentTrace=state.incidentTrace;state=next;render();}
 async function investigate(id){state.incidentTrace={id,traces:[],error:null,loading:true};renderFeeds();try{state.incidentTrace={id,traces:(await graphql(incidentTraceQuery,{id})).incidentTraces,error:null,loading:false};}catch(error){state.incidentTrace={id,traces:[],error:error.message,loading:false};}renderFeeds();}
 async function mutate(document,variables,message){try{await graphql(document,variables);toast(message);live.refresh();}catch(error){toast(error.message,true);}}
 function toast(message,error=false){const node=$("#toast");node.textContent=message;node.className=`show ${error?"error":""}`;clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.className="",2600);}

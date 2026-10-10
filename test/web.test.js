@@ -12,6 +12,8 @@ test("console assets use live GraphQL data", async () => {
   assert.match(script, /incidentTraces/);
   assert.match(script, /Investigate traces/);
   assert.match(script, /Healthy baseline/);
+  assert.match(script, /eventQueues/);
+  assert.match(script, /Queue telemetry unavailable/);
   assert.match(styles, /--critical/);
 });
 
