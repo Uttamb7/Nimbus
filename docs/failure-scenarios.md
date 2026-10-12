@@ -13,3 +13,7 @@
 Use GraphQL `injectFailure(service: "order-orchestrator", status: 503, latencyMs: 900, durationSeconds: 90)` in local demo mode. Nimbus records `failure.injected`, applies the fault without restarting containers, and can reverse it with `restoreService`.
 
 After an incident exists, Nimbus resolves it automatically only after three consecutive measured windows are back within the configured latency and error-rate thresholds. The incident update and its `nimbus-system` audit event commit together. This local-demo recovery records observed restoration; it does not restart services or roll back deployments.
+
+## Event consumer outage
+
+Stop `payment-worker`, then submit or republish an order event. Nimbus exposes the retained ready message immediately and creates one incident after three consecutive two-second samples report ready work with no consumer. Restart the worker; after the queue drains and three samples report a consumer with no ready work, Nimbus resolves the incident and records the recovery. Detection does not restart the worker or process the message itself.

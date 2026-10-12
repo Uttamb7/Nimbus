@@ -9,9 +9,49 @@ export class Operations {
   #violations = new Map();
   #recoveries = new Map();
   #baselines = new Map();
+  #queueViolations = new Map();
+  #queueRecoveries = new Map();
 
-  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, now = () => Date.now(), history = new History() } = {}) {
-    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, now, history });
+  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, queueWindows = 3, now = () => Date.now(), history = new History() } = {}) {
+    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, queueWindows, now, history });
+  }
+
+  async observeQueue(queue, service) {
+    const stalled = queue.ready > 0 && queue.consumers === 0;
+    const recovered = queue.ready === 0 && queue.consumers > 0;
+    const violations = stalled ? (this.#queueViolations.get(queue.name) || 0) + 1 : 0;
+    const recoveries = recovered ? (this.#queueRecoveries.get(queue.name) || 0) + 1 : 0;
+    this.#queueViolations.set(queue.name, Math.min(violations, this.queueWindows));
+    this.#queueRecoveries.set(queue.name, Math.min(recoveries, this.queueWindows));
+    const triggerCondition = `${queue.name} has ready messages with no consumers`;
+
+    if (violations >= this.queueWindows) {
+      this.#queueRecoveries.set(queue.name, 0);
+      return this.history.createIncident({
+        id: randomUUID(), severity: "SEV2", status: "OPEN",
+        title: `${service} event consumer is stalled`, suspectedService: service,
+        affectedServices: [service], triggerCondition,
+        evidence: {
+          queueReady: queue.ready,
+          queueUnacknowledged: queue.unacknowledged,
+          queueConsumers: queue.consumers,
+        },
+        baseline: null, createdAt: new Date(this.now()).toISOString(),
+        acknowledgedAt: null, resolvedAt: null,
+      });
+    }
+    if (recoveries >= this.queueWindows) {
+      this.#queueRecoveries.set(queue.name, 0);
+      const active = (await this.history.incidents()).find((incident) =>
+        incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
+      if (!active) return null;
+      const timestamp = new Date(this.now()).toISOString();
+      return this.history.resolveRecoveredIncident(service, Object.freeze({
+        id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
+        resource: "incident", metadata: JSON.stringify({ reason: "queue consumer recovered", queue: queue.name, consecutiveWindows: this.queueWindows }),
+      }));
+    }
+    return null;
   }
 
   observe(observation, { affectedServices = [observation.source] } = {}) {

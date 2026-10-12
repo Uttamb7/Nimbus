@@ -70,3 +70,45 @@ test("sustained measured recovery resolves an incident exactly once", async () =
   for (let index = 0; index < 3; index++) await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
   assert.equal((await history.auditLog()).length, 1);
 });
+
+test("sustained stalled consumer opens and recovers one queue incident", async () => {
+  let now = 1_000;
+  const history = new History();
+  const operations = new Operations({ history, queueWindows: 2, now: () => now++ });
+  const stalled = { name: "nimbus.payment-worker", ready: 3, unacknowledged: 1, consumers: 0 };
+  const healthy = { ...stalled, ready: 0, unacknowledged: 0, consumers: 1 };
+
+  await operations.observeQueue(stalled, "payment-worker");
+  await operations.observeQueue(healthy, "payment-worker");
+  assert.equal((await history.incidents()).length, 0);
+  await operations.observeQueue(stalled, "payment-worker");
+  await operations.observeQueue(stalled, "payment-worker");
+  await operations.observeQueue(stalled, "payment-worker");
+
+  const [incident] = await history.incidents();
+  assert.equal(incident.status, "OPEN");
+  assert.equal(incident.suspectedService, "payment-worker");
+  assert.deepEqual(incident.evidence, {
+    queueReady: 3, queueUnacknowledged: 1, queueConsumers: 0,
+  });
+  assert.equal((await history.incidents()).length, 1);
+
+  await operations.observeQueue(healthy, "payment-worker");
+  await operations.observeQueue(stalled, "payment-worker");
+  await operations.observeQueue(healthy, "payment-worker");
+  assert.equal((await history.incident(incident.id)).status, "OPEN");
+  await operations.observeQueue(healthy, "payment-worker");
+  assert.equal((await history.incident(incident.id)).status, "RESOLVED");
+  const [audit] = await history.auditLog();
+  assert.deepEqual(
+    { actor: audit.actor, action: audit.action, resourceId: audit.resourceId },
+    { actor: "nimbus-system", action: "incident.resolved", resourceId: incident.id },
+  );
+  assert.deepEqual(JSON.parse(audit.metadata), {
+    reason: "queue consumer recovered", queue: stalled.name, consecutiveWindows: 2,
+  });
+
+  await operations.observeQueue(stalled, "payment-worker");
+  await operations.observeQueue(stalled, "payment-worker");
+  assert.equal((await history.incidents()).length, 2);
+});

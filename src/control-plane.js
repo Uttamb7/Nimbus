@@ -13,7 +13,7 @@ import { inspectQuery, RateLimiter } from "./graphql-guard.js";
 import { History } from "./history.js";
 import { attachSubscriptions } from "./subscriptions.js";
 import { Traces } from "./traces.js";
-import { Queues } from "./queues.js";
+import { pollQueues, Queues } from "./queues.js";
 
 export const topology = new Topology();
 export const history = new History({ connectionString: config.databaseUrl });
@@ -57,5 +57,9 @@ export async function start(port = config.port) {
   await history.migrate();
   const server = createServer((request, response) => route(request, response).catch((error) => send(response, 400, { errors: [{ message: error.message }] })));
   attachSubscriptions(server, { topology, operations, authTokens: config.authTokens, rateLimiter });
+  const monitor = setInterval(() => void pollQueues(queues, operations), 2_000);
+  monitor.unref();
+  server.once("close", () => clearInterval(monitor));
+  void pollQueues(queues, operations);
   return new Promise((resolve) => server.listen(port, () => resolve(server)));
 }

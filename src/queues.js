@@ -4,6 +4,24 @@ const knownQueues = new Set([
   "nimbus.analytics-ingestor",
   "nimbus.dead-letter",
 ]);
+const consumerQueues = new Map([
+  ["nimbus.payment-worker", "payment-worker"],
+  ["nimbus.notification-router", "notification-router"],
+  ["nimbus.analytics-ingestor", "analytics-ingestor"],
+]);
+
+export async function pollQueues(source, operations) {
+  let queues;
+  try {
+    queues = await source.list();
+  } catch {
+    return;
+  }
+  await Promise.allSettled(queues.map((queue) => {
+    const service = consumerQueues.get(queue.name);
+    return service ? operations.observeQueue(queue, service) : null;
+  }));
+}
 
 export class Queues {
   constructor({ baseUrl, username, password, request = fetch } = {}) {

@@ -142,6 +142,11 @@ const queued = await waitFor(
   "control plane did not expose the stopped consumer backlog",
 );
 assert.equal(queued.ready, 1);
+const queueIncident = await waitFor(
+  async () => (await graphql("{ incidents { id status suspectedService triggerCondition evidence { queueReady queueUnacknowledged queueConsumers } } }")).incidents.find((incident) => incident.status === "OPEN" && incident.suspectedService === "payment-worker"),
+  (incident) => incident?.evidence.queueReady === 1 && incident.evidence.queueUnacknowledged === 0 && incident.evidence.queueConsumers === 0,
+  "stopped consumer backlog did not create an incident",
+);
 compose(["start", "payment-worker"], { stdio: "inherit" });
 await waitFor(
   paymentQueueCount,
@@ -152,6 +157,11 @@ await waitFor(
   async () => (await graphql("{ eventQueues { name ready consumers } }")).eventQueues.find((queue) => queue.name === "nimbus.payment-worker"),
   (queue) => queue?.ready === 0 && queue.consumers === 1,
   "control plane did not expose the recovered consumer queue",
+);
+await waitFor(
+  async () => await graphql("{ incidents { id status } auditLog { action resourceId actor } }"),
+  (state) => state.incidents.some((incident) => incident.id === queueIncident.id && incident.status === "RESOLVED") && state.auditLog.some((event) => event.resourceId === queueIncident.id && event.action === "incident.resolved" && event.actor === "nimbus-system"),
+  "recovered consumer did not resolve its incident",
 );
 await new Promise((resolve) => setTimeout(resolve, 250));
 compose(["stop", "payment-worker"], { stdio: "inherit" });

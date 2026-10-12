@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Queues } from "../src/queues.js";
+import { pollQueues, Queues } from "../src/queues.js";
 
 test("queue monitor maps only bounded Nimbus queue state", async () => {
   let requested;
@@ -33,4 +33,15 @@ test("queue monitor isolates configuration, transport, and malformed responses",
   await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response("bad", { status: 503 }) }).list(), /returned 503/);
   await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response("{}") }).list(), /malformed/);
   await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response('[{"name":"nimbus.dead-letter","messages_ready":-1,"messages_unacknowledged":0,"consumers":0}]') }).list(), /malformed/);
+});
+
+test("queue polling observes only consumer queues and isolates backend failures", async () => {
+  const observed = [];
+  const operations = { observeQueue: async (queue, service) => observed.push([queue.name, service]) };
+  await pollQueues({ list: async () => [
+    { name: "nimbus.payment-worker", ready: 1, unacknowledged: 0, consumers: 0 },
+    { name: "nimbus.dead-letter", ready: 1, unacknowledged: 0, consumers: 0 },
+  ] }, operations);
+  await pollQueues({ list: async () => { throw new Error("offline"); } }, operations);
+  assert.deepEqual(observed, [["nimbus.payment-worker", "payment-worker"]]);
 });

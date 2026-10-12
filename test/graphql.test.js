@@ -83,6 +83,27 @@ test("GraphQL exposes the stored incident snapshot", async () => {
   }]);
 });
 
+test("GraphQL exposes queue incident evidence without HTTP metric labels", async () => {
+  const operations = new Operations({ queueWindows: 1 });
+  await operations.observeQueue(
+    { name: "nimbus.payment-worker", ready: 2, unacknowledged: 1, consumers: 0 },
+    "payment-worker",
+  );
+
+  const result = await graphql({
+    schema,
+    source: "{ incidents { suspectedService evidence { requestCount queueReady queueUnacknowledged queueConsumers } } }",
+    rootValue: root(new Topology(), operations),
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [{
+    suspectedService: "payment-worker",
+    evidence: {
+      requestCount: null, queueReady: 2, queueUnacknowledged: 1, queueConsumers: 0,
+    },
+  }]);
+});
+
 test("GraphQL exposes the measured incident baseline", async () => {
   const operations = new Operations({ minSamples: 2, consecutiveWindows: 1, errorRateLimit: 0.2 });
   await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
