@@ -28,6 +28,15 @@ test("measured failures consume budget and create one incident", async () => {
   assert.equal(incidents[0].baseline, null);
 });
 
+test("error budget burn rate follows the measured sample window", async () => {
+  const operations = new Operations({ availabilityTarget: 0.5 });
+  assert.equal(operations.metrics("gateway").errorBudgetBurnRate, 0);
+  await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  assert.equal(operations.metrics("gateway").errorBudgetBurnRate, 0);
+  await operations.observe({ source: "gateway", status: 500, durationMs: 10 });
+  assert.equal(operations.metrics("gateway").errorBudgetBurnRate, 1);
+});
+
 test("incident captures the last measured compliant window", async () => {
   const operations = new Operations({ minSamples: 2, consecutiveWindows: 2, errorRateLimit: 0.2 });
   for (let index = 0; index < 2; index++) {

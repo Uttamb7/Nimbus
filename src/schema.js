@@ -5,7 +5,7 @@ export const schema = buildSchema(`
   enum HealthStatus { HEALTHY DEGRADED CRITICAL UNKNOWN }
   enum IncidentStatus { OPEN ACKNOWLEDGED RESOLVED }
   enum Severity { SEV1 SEV2 SEV3 }
-  type ServiceMetrics { requestCount: Int!, requestRate: Float!, errorRate: Float!, p50LatencyMs: Float!, p95LatencyMs: Float!, p99LatencyMs: Float!, availability: Float!, sloCompliance: Boolean!, errorBudgetRemaining: Float! }
+  type ServiceMetrics { requestCount: Int!, requestRate: Float!, errorRate: Float!, p50LatencyMs: Float!, p95LatencyMs: Float!, p99LatencyMs: Float!, availability: Float!, sloCompliance: Boolean!, errorBudgetRemaining: Float!, errorBudgetBurnRate: Float! }
   type Service { id: ID!, name: String!, version: String!, owner: String!, runtime: String!, health: HealthStatus!, slo: Float!, metrics: ServiceMetrics! }
   type GraphEdge { source: String!, destination: String!, protocol: String!, requestCount: Int!, errorCount: Int!, averageLatencyMs: Float!, lastObserved: String! }
   type IncidentEvidence { requestCount: Int, errorRate: Float, p50LatencyMs: Float, p95LatencyMs: Float, p99LatencyMs: Float, availability: Float, queueReady: Int, queueUnacknowledged: Int, queueConsumers: Int }

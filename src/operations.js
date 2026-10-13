@@ -99,7 +99,7 @@ export class Operations {
     const p95LatencyMs = percentile(durations, 0.95);
     const health = !samples.length ? "UNKNOWN" : samples.length >= this.minSamples && (errorRate > this.errorRateLimit || p95LatencyMs > this.p95LimitMs) ? "CRITICAL" : errorRate > 0 || p95LatencyMs > this.p95LimitMs * 0.75 ? "DEGRADED" : "HEALTHY";
     const budget = 1 - this.availabilityTarget;
-    return { requestCount: samples.length, requestRate: samples.length / elapsedSeconds, errorRate, p50LatencyMs: percentile(durations, 0.5), p95LatencyMs, p99LatencyMs: percentile(durations, 0.99), availability, sloCompliance: availability >= this.availabilityTarget, errorBudgetRemaining: samples.length ? Math.max(0, 1 - (1 - availability) / budget) : 0, health };
+    return { requestCount: samples.length, requestRate: samples.length / elapsedSeconds, errorRate, p50LatencyMs: percentile(durations, 0.5), p95LatencyMs, p99LatencyMs: percentile(durations, 0.99), availability, sloCompliance: availability >= this.availabilityTarget, errorBudgetRemaining: samples.length ? Math.max(0, 1 - errorRate / budget) : 0, errorBudgetBurnRate: samples.length ? errorRate / budget : 0, health };
   }
 
   incidents() {
