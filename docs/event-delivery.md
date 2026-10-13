@@ -8,6 +8,8 @@ Consumer failures are republished to the same durable queue with publisher confi
 
 The control plane samples the three consumer queues every two seconds. Three consecutive samples with ready messages and no consumer create one persisted SEV-2 incident for that consumer. After the consumer returns, three consecutive samples with no ready messages resolve that matching incident and append a `nimbus-system` audit event. Missing or unavailable queue data is ignored rather than treated as a failure or recovery signal. Dead-letter depth remains visible but does not use the stopped-consumer rule.
 
+The same poll treats three consecutive non-empty `nimbus.dead-letter` samples as a separate SEV-2 event-delivery incident. Three consecutive empty samples resolve it and record a `nimbus-system` audit event. Nimbus uses only aggregate queue counts for this signal; it does not inspect or replay dead-lettered messages or infer which consumer failed.
+
 Inspect queue depths and dead-letter messages at `http://localhost:15672` with the local-only `nimbus` / `nimbus-local` Compose credential, or list queue state directly:
 
 ```bash

@@ -54,6 +54,45 @@ export class Operations {
     return null;
   }
 
+  async observeDeadLetters(queue) {
+    const service = "event-delivery";
+    const failed = queue.ready > 0;
+    const drained = queue.ready === 0 && queue.unacknowledged === 0;
+    const violations = failed ? (this.#queueViolations.get(queue.name) || 0) + 1 : 0;
+    const recoveries = drained ? (this.#queueRecoveries.get(queue.name) || 0) + 1 : 0;
+    this.#queueViolations.set(queue.name, Math.min(violations, this.queueWindows));
+    this.#queueRecoveries.set(queue.name, Math.min(recoveries, this.queueWindows));
+    const triggerCondition = `${queue.name} contains failed messages`;
+
+    if (violations >= this.queueWindows) {
+      this.#queueRecoveries.set(queue.name, 0);
+      return this.history.createIncident({
+        id: randomUUID(), severity: "SEV2", status: "OPEN",
+        title: "order events reached the dead-letter queue", suspectedService: service,
+        affectedServices: [service], triggerCondition,
+        evidence: {
+          queueReady: queue.ready,
+          queueUnacknowledged: queue.unacknowledged,
+          queueConsumers: queue.consumers,
+        },
+        baseline: null, createdAt: new Date(this.now()).toISOString(),
+        acknowledgedAt: null, resolvedAt: null,
+      });
+    }
+    if (recoveries >= this.queueWindows) {
+      this.#queueRecoveries.set(queue.name, 0);
+      const active = (await this.history.incidents()).find((incident) =>
+        incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
+      if (!active) return null;
+      const timestamp = new Date(this.now()).toISOString();
+      return this.history.resolveRecoveredIncident(service, Object.freeze({
+        id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
+        resource: "incident", metadata: JSON.stringify({ reason: "dead-letter queue drained", queue: queue.name, consecutiveWindows: this.queueWindows }),
+      }));
+    }
+    return null;
+  }
+
   observe(observation, { affectedServices = [observation.source] } = {}) {
     const samples = this.#samples.get(observation.source) || [];
     samples.push({ status: observation.status, durationMs: observation.durationMs, at: this.now() });

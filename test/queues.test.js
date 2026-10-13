@@ -37,11 +37,17 @@ test("queue monitor isolates configuration, transport, and malformed responses",
 
 test("queue polling observes only consumer queues and isolates backend failures", async () => {
   const observed = [];
-  const operations = { observeQueue: async (queue, service) => observed.push([queue.name, service]) };
+  const operations = {
+    observeQueue: async (queue, service) => observed.push([queue.name, service]),
+    observeDeadLetters: async (queue) => observed.push([queue.name, "dead-letter"]),
+  };
   await pollQueues({ list: async () => [
     { name: "nimbus.payment-worker", ready: 1, unacknowledged: 0, consumers: 0 },
     { name: "nimbus.dead-letter", ready: 1, unacknowledged: 0, consumers: 0 },
   ] }, operations);
   await pollQueues({ list: async () => { throw new Error("offline"); } }, operations);
-  assert.deepEqual(observed, [["nimbus.payment-worker", "payment-worker"]]);
+  assert.deepEqual(observed, [
+    ["nimbus.payment-worker", "payment-worker"],
+    ["nimbus.dead-letter", "dead-letter"],
+  ]);
 });

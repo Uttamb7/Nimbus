@@ -19,7 +19,8 @@ export async function pollQueues(source, operations) {
   }
   await Promise.allSettled(queues.map((queue) => {
     const service = consumerQueues.get(queue.name);
-    return service ? operations.observeQueue(queue, service) : null;
+    if (service) return operations.observeQueue(queue, service);
+    return queue.name === "nimbus.dead-letter" ? operations.observeDeadLetters(queue) : null;
   }));
 }
 
