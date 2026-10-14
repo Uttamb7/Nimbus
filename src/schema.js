@@ -8,14 +8,15 @@ export const schema = buildSchema(`
   type ServiceMetrics { requestCount: Int!, requestRate: Float!, errorRate: Float!, p50LatencyMs: Float!, p95LatencyMs: Float!, p99LatencyMs: Float!, availability: Float!, sloCompliance: Boolean!, errorBudgetRemaining: Float!, errorBudgetBurnRate: Float! }
   type Service { id: ID!, name: String!, version: String!, owner: String!, runtime: String!, health: HealthStatus!, slo: Float!, metrics: ServiceMetrics! }
   type GraphEdge { source: String!, destination: String!, protocol: String!, requestCount: Int!, errorCount: Int!, averageLatencyMs: Float!, lastObserved: String! }
-  type IncidentEvidence { requestCount: Int, errorRate: Float, p50LatencyMs: Float, p95LatencyMs: Float, p99LatencyMs: Float, availability: Float, queueReady: Int, queueUnacknowledged: Int, queueConsumers: Int }
+  type IncidentEvidence { requestCount: Int, errorRate: Float, p50LatencyMs: Float, p95LatencyMs: Float, p99LatencyMs: Float, availability: Float, queueReady: Int, queueUnacknowledged: Int, queueConsumers: Int, outboxPending: Int, outboxPublishing: Int, outboxPublished: Int, outboxDeadLetter: Int, oldestUnsentAt: String }
   type Incident { id: ID!, severity: Severity!, status: IncidentStatus!, title: String!, suspectedService: String!, affectedServices: [String!]!, triggerCondition: String!, evidence: IncidentEvidence!, baseline: IncidentEvidence, createdAt: String!, acknowledgedAt: String, resolvedAt: String }
   type SystemHealth { status: HealthStatus!, healthy: Int!, degraded: Int!, critical: Int!, unknown: Int! }
   type AuditEvent { id: ID!, timestamp: String!, actor: String!, action: String!, resource: String!, resourceId: String!, metadata: String! }
   type TraceSpan { spanId: ID!, parentSpanId: ID, service: String!, operation: String!, startTime: String!, durationMs: Float!, error: Boolean! }
   type Trace { traceId: ID!, startTime: String!, durationMs: Float!, services: [String!]!, spans: [TraceSpan!]! }
   type EventQueue { name: String!, ready: Int!, unacknowledged: Int!, consumers: Int! }
-  type Query { services: [Service!]!, serviceGraph: [GraphEdge!]!, shortestPath(source: String!, destination: String!): [String!]!, incidents: [Incident!]!, incident(id: ID!): Incident, systemHealth: SystemHealth!, auditLog: [AuditEvent!]!, recentTraces(service: String!, limit: Int = 5): [Trace!]!, incidentTraces(id: ID!, limit: Int = 5): [Trace!]!, eventQueues: [EventQueue!]! }
+  type OutboxState { pending: Int!, publishing: Int!, published: Int!, deadLetter: Int!, oldestUnsentAt: String }
+  type Query { services: [Service!]!, serviceGraph: [GraphEdge!]!, shortestPath(source: String!, destination: String!): [String!]!, incidents: [Incident!]!, incident(id: ID!): Incident, systemHealth: SystemHealth!, auditLog: [AuditEvent!]!, recentTraces(service: String!, limit: Int = 5): [Trace!]!, incidentTraces(id: ID!, limit: Int = 5): [Trace!]!, eventQueues: [EventQueue!]!, outboxState: OutboxState! }
   type Mutation { injectFailure(service: String!, status: Int = 503, latencyMs: Int = 0, durationSeconds: Int = 60): AuditEvent!, restoreService(service: String!): AuditEvent!, generateTraffic(count: Int = 1): AuditEvent!, acknowledgeIncident(id: ID!): AuditEvent!, resolveIncident(id: ID!): AuditEvent! }
   type Subscription { serviceHealthChanged: Service, incidentChanged: Incident, auditEventAdded: AuditEvent }
 `);
@@ -68,6 +69,10 @@ export function root(topology, operations, actions, identity = { role: "viewer",
       requireRole(identity, "viewer");
       if (!queues) throw new Error("queue backend is not configured");
       return queues.list();
+    },
+    outboxState: () => {
+      requireRole(identity, "viewer");
+      return operations.outboxState();
     },
     injectFailure: (input) => { requireRole(identity, "admin"); return actions.injectFailure(input, identity.actor); },
     restoreService: (input) => { requireRole(identity, "admin"); return actions.restoreService(input, identity.actor); },

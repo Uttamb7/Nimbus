@@ -112,6 +112,12 @@ const outbox = await waitFor(
   "outbox event was not broker-confirmed after recovery",
 );
 assert.equal(outbox, "PUBLISHED|order.created|1");
+const outboxState = (await graphql("{ outboxState { pending publishing published deadLetter oldestUnsentAt } }")).outboxState;
+assert.equal(outboxState.pending, 0);
+assert.equal(outboxState.publishing, 0);
+assert.ok(outboxState.published >= 1);
+assert.equal(outboxState.deadLetter, 0);
+assert.equal(outboxState.oldestUnsentAt, null);
 
 const event = JSON.parse(sql(`SELECT event::text FROM outbox_events WHERE aggregate_id = '${order.orderId}'`));
 compose(["restart", "rabbitmq"], { stdio: "inherit" });

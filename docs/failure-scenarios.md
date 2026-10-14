@@ -21,3 +21,7 @@ Stop `payment-worker`, then submit or republish an order event. Nimbus exposes t
 ## Dead-lettered event
 
 After a consumer exhausts its five attempts, RabbitMQ retains the rejected message in `nimbus.dead-letter`. Three consecutive non-empty samples create one event-delivery incident. Inspect and handle the failed message through RabbitMQ operations; Nimbus does not expose its payload or replay it. After the queue is empty for three consecutive samples, Nimbus resolves the incident and records the recovery.
+
+## Producer delivery exhaustion
+
+When the order orchestrator exhausts its ten broker publication attempts, PostgreSQL retains the outbox row as `DEAD_LETTER`. Nimbus exposes aggregate producer counts and creates one producer-delivery incident after three consecutive samples contain such rows. Inspect and repair the row through PostgreSQL operations; Nimbus does not expose its payload or failure text and does not replay or delete it. After no producer dead-letter rows remain for three samples, Nimbus resolves the incident and records the recovery.

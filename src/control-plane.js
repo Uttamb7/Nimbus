@@ -6,7 +6,7 @@ import { config } from "./config.js";
 import { body, send } from "./http.js";
 import { root, schema } from "./schema.js";
 import { Topology } from "./topology.js";
-import { Operations } from "./operations.js";
+import { Operations, pollOutbox } from "./operations.js";
 import { Actions } from "./actions.js";
 import { authenticate } from "./auth.js";
 import { inspectQuery, RateLimiter } from "./graphql-guard.js";
@@ -57,9 +57,13 @@ export async function start(port = config.port) {
   await history.migrate();
   const server = createServer((request, response) => route(request, response).catch((error) => send(response, 400, { errors: [{ message: error.message }] })));
   attachSubscriptions(server, { topology, operations, authTokens: config.authTokens, rateLimiter });
-  const monitor = setInterval(() => void pollQueues(queues, operations), 2_000);
+  const monitor = setInterval(() => {
+    void pollQueues(queues, operations);
+    void pollOutbox(history, operations);
+  }, 2_000);
   monitor.unref();
   server.once("close", () => clearInterval(monitor));
   void pollQueues(queues, operations);
+  void pollOutbox(history, operations);
   return new Promise((resolve) => server.listen(port, () => resolve(server)));
 }

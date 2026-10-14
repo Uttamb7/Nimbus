@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { History } from "../src/history.js";
-import { Operations } from "../src/operations.js";
+import { Operations, pollOutbox } from "../src/operations.js";
 
 test("measured failures consume budget and create one incident", async () => {
   let now = 1_000;
@@ -159,4 +159,52 @@ test("sustained dead-letter backlog opens and recovers one delivery incident", a
   assert.deepEqual(JSON.parse(audit.metadata), {
     reason: "dead-letter queue drained", queue: failed.name, consecutiveWindows: 2,
   });
+});
+
+test("sustained producer dead letters open and recover one outbox incident", async () => {
+  let now = 1_000;
+  const history = new History();
+  const operations = new Operations({ history, outboxWindows: 2, now: () => now++ });
+  const failed = { pending: 2, publishing: 1, published: 7, deadLetter: 3, oldestUnsentAt: "2026-10-14T12:00:00.000Z" };
+  const clear = { ...failed, pending: 0, publishing: 0, deadLetter: 0, oldestUnsentAt: null };
+
+  await operations.observeOutbox(failed);
+  await operations.observeOutbox(clear);
+  await operations.observeOutbox(failed);
+  assert.equal((await history.incidents()).length, 0);
+  await operations.observeOutbox(failed);
+  await operations.observeOutbox(failed);
+
+  const [incident] = await history.incidents();
+  assert.equal(incident.status, "OPEN");
+  assert.equal(incident.suspectedService, "producer-delivery");
+  assert.deepEqual(incident.evidence, {
+    outboxPending: 2, outboxPublishing: 1, outboxPublished: 7,
+    outboxDeadLetter: 3, oldestUnsentAt: "2026-10-14T12:00:00.000Z",
+  });
+  assert.equal((await history.incidents()).length, 1);
+
+  await operations.observeOutbox(clear);
+  await operations.observeOutbox(failed);
+  await operations.observeOutbox(clear);
+  assert.equal((await history.incident(incident.id)).status, "OPEN");
+  await operations.observeOutbox(clear);
+  assert.equal((await history.incident(incident.id)).status, "RESOLVED");
+  const [audit] = await history.auditLog();
+  assert.deepEqual(
+    { actor: audit.actor, action: audit.action, resourceId: audit.resourceId },
+    { actor: "nimbus-system", action: "incident.resolved", resourceId: incident.id },
+  );
+  assert.deepEqual(JSON.parse(audit.metadata), {
+    reason: "producer outbox cleared", consecutiveWindows: 2,
+  });
+});
+
+test("outbox polling ignores failed samples", async () => {
+  const observed = [];
+  const operations = { observeOutbox: async (state) => observed.push(state) };
+  const state = { pending: 0, publishing: 0, published: 1, deadLetter: 0, oldestUnsentAt: null };
+  await pollOutbox({ outboxState: async () => state }, operations);
+  await pollOutbox({ outboxState: async () => { throw new Error("offline"); } }, operations);
+  assert.deepEqual(observed, [state]);
 });

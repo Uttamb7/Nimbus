@@ -11,9 +11,11 @@ export class Operations {
   #baselines = new Map();
   #queueViolations = new Map();
   #queueRecoveries = new Map();
+  #outboxViolations = 0;
+  #outboxRecoveries = 0;
 
-  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, queueWindows = 3, now = () => Date.now(), history = new History() } = {}) {
-    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, queueWindows, now, history });
+  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, queueWindows = 3, outboxWindows = 3, now = () => Date.now(), history = new History() } = {}) {
+    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, queueWindows, outboxWindows, now, history });
   }
 
   async observeQueue(queue, service) {
@@ -93,6 +95,48 @@ export class Operations {
     return null;
   }
 
+  async observeOutbox(state) {
+    const failed = state.deadLetter > 0;
+    this.#outboxViolations = failed ? Math.min(this.#outboxViolations + 1, this.outboxWindows) : 0;
+    this.#outboxRecoveries = failed ? 0 : Math.min(this.#outboxRecoveries + 1, this.outboxWindows);
+    const service = "producer-delivery";
+    const triggerCondition = "producer outbox contains dead-letter events";
+
+    if (this.#outboxViolations >= this.outboxWindows) {
+      return this.history.createIncident({
+        id: randomUUID(), severity: "SEV2", status: "OPEN",
+        title: "order event producer has dead-lettered events", suspectedService: service,
+        affectedServices: ["order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"],
+        triggerCondition,
+        evidence: {
+          outboxPending: state.pending,
+          outboxPublishing: state.publishing,
+          outboxPublished: state.published,
+          outboxDeadLetter: state.deadLetter,
+          oldestUnsentAt: state.oldestUnsentAt,
+        },
+        baseline: null, createdAt: new Date(this.now()).toISOString(),
+        acknowledgedAt: null, resolvedAt: null,
+      });
+    }
+    if (this.#outboxRecoveries >= this.outboxWindows) {
+      this.#outboxRecoveries = 0;
+      const active = (await this.history.incidents()).find((incident) =>
+        incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
+      if (!active) return null;
+      const timestamp = new Date(this.now()).toISOString();
+      return this.history.resolveRecoveredIncident(service, Object.freeze({
+        id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
+        resource: "incident", metadata: JSON.stringify({ reason: "producer outbox cleared", consecutiveWindows: this.outboxWindows }),
+      }));
+    }
+    return null;
+  }
+
+  outboxState() {
+    return this.history.outboxState();
+  }
+
   observe(observation, { affectedServices = [observation.source] } = {}) {
     const samples = this.#samples.get(observation.source) || [];
     samples.push({ status: observation.status, durationMs: observation.durationMs, at: this.now() });
@@ -155,5 +199,13 @@ export class Operations {
     const incident = await this.history.updateIncident(id, "RESOLVED", new Date(this.now()).toISOString());
     if (!incident) throw new Error("incident is not active");
     return incident;
+  }
+}
+
+export async function pollOutbox(source, operations) {
+  try {
+    await operations.observeOutbox(await source.outboxState());
+  } catch {
+    // A missing database sample is neither a failure nor a recovery signal.
   }
 }

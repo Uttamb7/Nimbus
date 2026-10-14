@@ -96,3 +96,20 @@ test("failed recovery transaction publishes no incident or audit", async () => {
   assert.equal((await nextIncident).done, true);
   assert.equal((await nextAudit).done, true);
 });
+
+test("outbox state exposes only aggregate producer delivery data", async () => {
+  const history = new History({ pool: { query: async (sql) => {
+    assert.match(sql, /count\(\*\) FILTER/);
+    assert.doesNotMatch(sql, /event\s*[,$]|failure_reason|aggregate_id/i);
+    return { rows: [{
+      pending: "2", publishing: "1", published: "7", dead_letter: "3",
+      oldest_unsent_at: "2026-10-14T12:00:00.000Z",
+    }] };
+  } } });
+
+  assert.deepEqual(await history.outboxState(), {
+    pending: 2, publishing: 1, published: 7, deadLetter: 3,
+    oldestUnsentAt: "2026-10-14T12:00:00.000Z",
+  });
+  await assert.rejects(new History().outboxState(), /not configured/);
+});

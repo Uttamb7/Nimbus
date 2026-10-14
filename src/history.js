@@ -164,4 +164,25 @@ export class History {
     const result = await this.pool.query("SELECT * FROM audit_events ORDER BY recorded_at DESC");
     return result.rows.map(auditFromRow);
   }
+
+  async outboxState() {
+    if (!this.pool) throw new Error("outbox backend is not configured");
+    const result = await this.pool.query(
+      `SELECT
+         count(*) FILTER (WHERE status = 'PENDING') AS pending,
+         count(*) FILTER (WHERE status = 'PUBLISHING') AS publishing,
+         count(*) FILTER (WHERE status = 'PUBLISHED') AS published,
+         count(*) FILTER (WHERE status = 'DEAD_LETTER') AS dead_letter,
+         min(created_at) FILTER (WHERE status <> 'PUBLISHED') AS oldest_unsent_at
+       FROM outbox_events`,
+    );
+    const row = result.rows[0];
+    return {
+      pending: Number(row.pending),
+      publishing: Number(row.publishing),
+      published: Number(row.published),
+      deadLetter: Number(row.dead_letter),
+      oldestUnsentAt: iso(row.oldest_unsent_at),
+    };
+  }
 }

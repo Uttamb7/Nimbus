@@ -32,6 +32,16 @@ test("GraphQL exposes queue state only to viewers", async () => {
   assert.match(unauthorized.errors[0].message, /viewer role required/);
 });
 
+test("GraphQL exposes aggregate outbox state only to viewers", async () => {
+  const expected = { pending: 2, publishing: 1, published: 7, deadLetter: 3, oldestUnsentAt: "2026-10-14T12:00:00.000Z" };
+  const operations = new Operations({ history: { outboxState: async () => expected } });
+  const source = "{ outboxState { pending publishing published deadLetter oldestUnsentAt } }";
+  const result = await graphql({ schema, source, rootValue: root(new Topology(), operations, undefined, { role: "viewer", actor: "Reader" }) });
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.outboxState)), expected);
+  const unauthorized = await graphql({ schema, source, rootValue: root(new Topology(), operations, undefined, null) });
+  assert.match(unauthorized.errors[0].message, /viewer role required/);
+});
+
 test("GraphQL scopes incident traces to stored evidence time", async () => {
   const operations = new Operations({ minSamples: 1, consecutiveWindows: 1, now: () => Date.parse("2023-11-14T22:13:20.000Z") });
   await operations.observe({ source: "gateway", status: 503, durationMs: 900 });
@@ -100,6 +110,28 @@ test("GraphQL exposes queue incident evidence without HTTP metric labels", async
     suspectedService: "payment-worker",
     evidence: {
       requestCount: null, queueReady: 2, queueUnacknowledged: 1, queueConsumers: 0,
+    },
+  }]);
+});
+
+test("GraphQL exposes producer outbox incident evidence", async () => {
+  const operations = new Operations({ outboxWindows: 1 });
+  await operations.observeOutbox({
+    pending: 2, publishing: 1, published: 7, deadLetter: 3,
+    oldestUnsentAt: "2026-10-14T12:00:00.000Z",
+  });
+
+  const result = await graphql({
+    schema,
+    source: "{ incidents { suspectedService evidence { outboxPending outboxPublishing outboxPublished outboxDeadLetter oldestUnsentAt } } }",
+    rootValue: root(new Topology(), operations),
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [{
+    suspectedService: "producer-delivery",
+    evidence: {
+      outboxPending: 2, outboxPublishing: 1, outboxPublished: 7,
+      outboxDeadLetter: 3, oldestUnsentAt: "2026-10-14T12:00:00.000Z",
     },
   }]);
 });
