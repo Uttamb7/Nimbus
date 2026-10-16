@@ -48,7 +48,7 @@ export class Operations {
         incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
       if (!active) return null;
       const timestamp = new Date(this.now()).toISOString();
-      return this.history.resolveRecoveredIncident(service, Object.freeze({
+      return this.history.resolveRecoveredIncident(service, triggerCondition, Object.freeze({
         id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
         resource: "incident", metadata: JSON.stringify({ reason: "queue consumer recovered", queue: queue.name, consecutiveWindows: this.queueWindows }),
       }));
@@ -87,7 +87,7 @@ export class Operations {
         incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
       if (!active) return null;
       const timestamp = new Date(this.now()).toISOString();
-      return this.history.resolveRecoveredIncident(service, Object.freeze({
+      return this.history.resolveRecoveredIncident(service, triggerCondition, Object.freeze({
         id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
         resource: "incident", metadata: JSON.stringify({ reason: "dead-letter queue drained", queue: queue.name, consecutiveWindows: this.queueWindows }),
       }));
@@ -129,7 +129,7 @@ export class Operations {
         incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
       if (!active) return null;
       const timestamp = new Date(sampledAt).toISOString();
-      return this.history.resolveRecoveredIncident(service, Object.freeze({
+      return this.history.resolveRecoveredIncident(service, triggerCondition, Object.freeze({
         id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
         resource: "incident", metadata: JSON.stringify({ reason: "producer outbox recovered", consecutiveWindows: this.outboxWindows }),
       }));
@@ -141,7 +141,7 @@ export class Operations {
     return this.history.outboxState();
   }
 
-  observe(observation, { affectedServices = [observation.source] } = {}) {
+  async observe(observation, { affectedServices = [observation.source] } = {}) {
     const samples = this.#samples.get(observation.source) || [];
     samples.push({ status: observation.status, durationMs: observation.durationMs, at: this.now() });
     if (samples.length > 100) samples.shift();
@@ -150,6 +150,7 @@ export class Operations {
     const metrics = this.metrics(observation.source);
     this.history.events.publish("serviceHealthChanged", { name: observation.source, metrics });
     const violated = metrics.requestCount >= this.minSamples && (metrics.p95LatencyMs > this.p95LimitMs || metrics.errorRate > this.errorRateLimit);
+    const metricTriggers = [`p95 latency exceeded ${this.p95LimitMs} ms`, `error rate exceeded ${this.errorRateLimit * 100}%`];
     if (!violated && metrics.requestCount >= this.minSamples) this.#baselines.set(observation.source, evidence(metrics));
     const count = violated ? (this.#violations.get(observation.source) || 0) + 1 : 0;
     this.#violations.set(observation.source, count);
@@ -168,8 +169,11 @@ export class Operations {
     }
     if (this.#recoveries.get(observation.source) >= this.recoveryWindows) {
       this.#recoveries.set(observation.source, 0);
+      const active = (await this.history.incidents()).find((incident) =>
+        incident.status !== "RESOLVED" && incident.suspectedService === observation.source && metricTriggers.includes(incident.triggerCondition));
+      if (!active) return null;
       const timestamp = new Date(this.now()).toISOString();
-      return this.history.resolveRecoveredIncident(observation.source, Object.freeze({
+      return this.history.resolveRecoveredIncident(observation.source, active.triggerCondition, Object.freeze({
         id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
         resource: "incident", metadata: JSON.stringify({ reason: "measured recovery", consecutiveWindows: this.recoveryWindows }),
       }));

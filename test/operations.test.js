@@ -60,7 +60,7 @@ test("incident captures the last measured compliant window", async () => {
 test("sustained measured recovery resolves an incident exactly once", async () => {
   let now = 1_000;
   const history = new History();
-  await history.createIncident({ id: "incident", severity: "SEV2", status: "OPEN", title: "gateway is unhealthy", suspectedService: "gateway", triggerCondition: "error rate", createdAt: new Date(now++).toISOString(), acknowledgedAt: null, resolvedAt: null });
+  await history.createIncident({ id: "incident", severity: "SEV2", status: "OPEN", title: "gateway is unhealthy", suspectedService: "gateway", triggerCondition: "error rate exceeded 20%", createdAt: new Date(now++).toISOString(), acknowledgedAt: null, resolvedAt: null });
   const operations = new Operations({ history, minSamples: 1, errorRateLimit: 0.2, p95LimitMs: 1_000, recoveryWindows: 3, now: () => now++ });
 
   await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
@@ -77,6 +77,24 @@ test("sustained measured recovery resolves an incident exactly once", async () =
   assert.deepEqual(JSON.parse(audit[0].metadata), { reason: "measured recovery", consecutiveWindows: 3 });
 
   for (let index = 0; index < 3; index++) await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  assert.equal((await history.auditLog()).length, 1);
+});
+
+test("measured recovery cannot resolve a queue incident for the same service", async () => {
+  const history = new History();
+  const operations = new Operations({
+    history, minSamples: 1, recoveryWindows: 1, queueWindows: 1,
+  });
+  const stalled = { name: "nimbus.payment-worker", ready: 1, unacknowledged: 0, consumers: 0 };
+  await operations.observeQueue(stalled, "payment-worker");
+  const [incident] = await history.incidents();
+
+  await operations.observe({ source: "payment-worker", status: 200, durationMs: 1 });
+  assert.equal((await history.incident(incident.id)).status, "OPEN");
+  assert.equal((await history.auditLog()).length, 0);
+
+  await operations.observeQueue({ ...stalled, ready: 0, consumers: 1 }, "payment-worker");
+  assert.equal((await history.incident(incident.id)).status, "RESOLVED");
   assert.equal((await history.auditLog()).length, 1);
 });
 

@@ -56,11 +56,12 @@ test("recovery resolution publishes the incident and audit together", async () =
   await history.createIncident({ id: "incident", severity: "SEV2", status: "OPEN", title: "gateway is unhealthy", suspectedService: "gateway", triggerCondition: "error rate", createdAt: "2026-09-04T12:00:00.000Z", acknowledgedAt: null, resolvedAt: null });
   await incidents.next();
 
-  const result = await history.resolveRecoveredIncident("gateway", { id: "audit", timestamp: "2026-09-04T12:01:00.000Z", actor: "nimbus-system", action: "incident.resolved", resource: "incident", metadata: '{"reason":"measured recovery"}' });
+  assert.equal(await history.resolveRecoveredIncident("gateway", "queue stalled", { id: "wrong" }), null);
+  const result = await history.resolveRecoveredIncident("gateway", "error rate", { id: "audit", timestamp: "2026-09-04T12:01:00.000Z", actor: "nimbus-system", action: "incident.resolved", resource: "incident", metadata: '{"reason":"measured recovery"}' });
   assert.equal(result.incident.status, "RESOLVED");
   assert.equal((await incidents.next()).value.incidentChanged.status, "RESOLVED");
   assert.equal((await audits.next()).value.auditEventAdded.resourceId, "incident");
-  assert.equal(await history.resolveRecoveredIncident("gateway", { id: "duplicate" }), null);
+  assert.equal(await history.resolveRecoveredIncident("gateway", "error rate", { id: "duplicate" }), null);
   assert.equal((await history.auditLog()).length, 1);
   await incidents.return();
   await audits.return();
@@ -69,10 +70,14 @@ test("recovery resolution publishes the incident and audit together", async () =
 test("failed recovery transaction publishes no incident or audit", async () => {
   let rolledBack = false;
   const client = {
-    query: async (sql) => {
+    query: async (sql, values) => {
       if (sql === "BEGIN" || sql === "COMMIT") return { rows: [] };
       if (sql === "ROLLBACK") { rolledBack = true; return { rows: [] }; }
-      if (sql.startsWith("SELECT id")) return { rows: [{ id: "incident" }] };
+      if (sql.startsWith("SELECT id")) {
+        assert.match(sql, /trigger_condition = \$2/);
+        assert.deepEqual(values, ["gateway", "error rate"]);
+        return { rows: [{ id: "incident" }] };
+      }
       if (sql.startsWith("UPDATE incidents")) return { rows: [{ id: "incident", severity: "SEV2", status: "RESOLVED", title: "Failure", suspected_service: "gateway", trigger_condition: "error rate", created_at: "2026-09-04T12:00:00.000Z", resolved_at: "2026-09-04T12:01:00.000Z" }] };
       throw new Error("audit unavailable");
     },
@@ -87,7 +92,7 @@ test("failed recovery transaction publishes no incident or audit", async () => {
   const nextAudit = audits.next();
 
   await assert.rejects(
-    history.resolveRecoveredIncident("gateway", { id: "audit", timestamp: "2026-09-04T12:01:00.000Z", actor: "nimbus-system", action: "incident.resolved", resource: "incident", metadata: "{}" }),
+    history.resolveRecoveredIncident("gateway", "error rate", { id: "audit", timestamp: "2026-09-04T12:01:00.000Z", actor: "nimbus-system", action: "incident.resolved", resource: "incident", metadata: "{}" }),
     /audit unavailable/,
   );
   assert.equal(rolledBack, true);

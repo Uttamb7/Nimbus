@@ -95,9 +95,9 @@ export class History {
     return updated;
   }
 
-  async resolveRecoveredIncident(service, event) {
+  async resolveRecoveredIncident(service, triggerCondition, event) {
     if (!this.pool) {
-      const incident = this.#incidents.find((value) => value.suspectedService === service && value.status !== "RESOLVED");
+      const incident = this.#incidents.find((value) => value.suspectedService === service && value.triggerCondition === triggerCondition && value.status !== "RESOLVED");
       if (!incident) return null;
       incident.status = "RESOLVED";
       incident.resolvedAt = event.timestamp;
@@ -113,8 +113,8 @@ export class History {
     try {
       await client.query("BEGIN");
       const active = await client.query(
-        "SELECT id FROM incidents WHERE suspected_service = $1 AND status <> 'RESOLVED' FOR UPDATE",
-        [service],
+        "SELECT id FROM incidents WHERE suspected_service = $1 AND trigger_condition = $2 AND status <> 'RESOLVED' FOR UPDATE",
+        [service, triggerCondition],
       );
       if (!active.rows[0]) {
         await client.query("COMMIT");
