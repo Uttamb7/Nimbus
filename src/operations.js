@@ -14,8 +14,8 @@ export class Operations {
   #outboxViolations = 0;
   #outboxRecoveries = 0;
 
-  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, queueWindows = 3, outboxWindows = 3, now = () => Date.now(), history = new History() } = {}) {
-    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, queueWindows, outboxWindows, now, history });
+  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, queueWindows = 3, outboxWindows = 3, outboxDelayMs = 60_000, now = () => Date.now(), history = new History() } = {}) {
+    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, queueWindows, outboxWindows, outboxDelayMs, now, history });
   }
 
   async observeQueue(queue, service) {
@@ -96,16 +96,20 @@ export class Operations {
   }
 
   async observeOutbox(state) {
-    const failed = state.deadLetter > 0;
-    this.#outboxViolations = failed ? Math.min(this.#outboxViolations + 1, this.outboxWindows) : 0;
-    this.#outboxRecoveries = failed ? 0 : Math.min(this.#outboxRecoveries + 1, this.outboxWindows);
+    const sampledAt = this.now();
+    const active = state.pending + state.publishing > 0;
+    const oldestUnsentAt = active ? Date.parse(state.oldestUnsentAt) : NaN;
+    if (state.deadLetter === 0 && active && !Number.isFinite(oldestUnsentAt)) return null;
+    const impaired = state.deadLetter > 0 || (active && sampledAt - oldestUnsentAt >= this.outboxDelayMs);
+    this.#outboxViolations = impaired ? Math.min(this.#outboxViolations + 1, this.outboxWindows) : 0;
+    this.#outboxRecoveries = impaired ? 0 : Math.min(this.#outboxRecoveries + 1, this.outboxWindows);
     const service = "producer-delivery";
-    const triggerCondition = "producer outbox contains dead-letter events";
+    const triggerCondition = "producer outbox contains dead-letter or delayed events";
 
     if (this.#outboxViolations >= this.outboxWindows) {
       return this.history.createIncident({
         id: randomUUID(), severity: "SEV2", status: "OPEN",
-        title: "order event producer has dead-lettered events", suspectedService: service,
+        title: "order event producer delivery is impaired", suspectedService: service,
         affectedServices: ["order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"],
         triggerCondition,
         evidence: {
@@ -115,7 +119,7 @@ export class Operations {
           outboxDeadLetter: state.deadLetter,
           oldestUnsentAt: state.oldestUnsentAt,
         },
-        baseline: null, createdAt: new Date(this.now()).toISOString(),
+        baseline: null, createdAt: new Date(sampledAt).toISOString(),
         acknowledgedAt: null, resolvedAt: null,
       });
     }
@@ -124,10 +128,10 @@ export class Operations {
       const active = (await this.history.incidents()).find((incident) =>
         incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
       if (!active) return null;
-      const timestamp = new Date(this.now()).toISOString();
+      const timestamp = new Date(sampledAt).toISOString();
       return this.history.resolveRecoveredIncident(service, Object.freeze({
         id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
-        resource: "incident", metadata: JSON.stringify({ reason: "producer outbox cleared", consecutiveWindows: this.outboxWindows }),
+        resource: "incident", metadata: JSON.stringify({ reason: "producer outbox recovered", consecutiveWindows: this.outboxWindows }),
       }));
     }
     return null;

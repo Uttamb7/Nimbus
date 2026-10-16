@@ -196,8 +196,56 @@ test("sustained producer dead letters open and recover one outbox incident", asy
     { actor: "nimbus-system", action: "incident.resolved", resourceId: incident.id },
   );
   assert.deepEqual(JSON.parse(audit.metadata), {
-    reason: "producer outbox cleared", consecutiveWindows: 2,
+    reason: "producer outbox recovered", consecutiveWindows: 2,
   });
+});
+
+test("sustained producer delay opens one incident across failure states", async () => {
+  let now = Date.parse("2026-10-15T12:02:00.000Z");
+  const history = new History();
+  const operations = new Operations({
+    history, outboxWindows: 2, outboxDelayMs: 60_000, now: () => now,
+  });
+  const delayed = {
+    pending: 2, publishing: 0, published: 7, deadLetter: 0,
+    oldestUnsentAt: "2026-10-15T12:00:00.000Z",
+  };
+  const fresh = { ...delayed, oldestUnsentAt: "2026-10-15T12:01:30.000Z" };
+
+  await operations.observeOutbox(delayed);
+  await operations.observeOutbox(fresh);
+  await operations.observeOutbox(delayed);
+  assert.equal((await history.incidents()).length, 0);
+  await operations.observeOutbox(delayed);
+
+  const [incident] = await history.incidents();
+  assert.equal(incident.status, "OPEN");
+  assert.match(incident.triggerCondition, /dead-letter or delayed/);
+  assert.deepEqual(incident.evidence, {
+    outboxPending: 2, outboxPublishing: 0, outboxPublished: 7,
+    outboxDeadLetter: 0, oldestUnsentAt: delayed.oldestUnsentAt,
+  });
+
+  const deadLetter = { ...delayed, pending: 0, deadLetter: 1 };
+  await operations.observeOutbox(deadLetter);
+  await operations.observeOutbox(deadLetter);
+  assert.equal((await history.incidents()).length, 1);
+  assert.equal((await history.incident(incident.id)).status, "OPEN");
+
+  now += 1;
+  await operations.observeOutbox(fresh);
+  await operations.observeOutbox(fresh);
+  assert.equal((await history.incident(incident.id)).status, "RESOLVED");
+  assert.equal((await history.auditLog()).length, 1);
+});
+
+test("producer delay ignores active samples without a usable timestamp", async () => {
+  const history = new History();
+  const operations = new Operations({ history, outboxWindows: 1 });
+  await operations.observeOutbox({
+    pending: 1, publishing: 0, published: 0, deadLetter: 0, oldestUnsentAt: "invalid",
+  });
+  assert.equal((await history.incidents()).length, 0);
 });
 
 test("outbox polling ignores failed samples", async () => {

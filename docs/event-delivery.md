@@ -10,7 +10,7 @@ The control plane samples the three consumer queues every two seconds. Three con
 
 The same poll treats three consecutive non-empty `nimbus.dead-letter` samples as a separate SEV-2 event-delivery incident. Three consecutive empty samples resolve it and record a `nimbus-system` audit event. Nimbus uses only aggregate queue counts for this signal; it does not inspect or replay dead-lettered messages or infer which consumer failed.
 
-The console and viewer-authorized `outboxState` query separately report aggregate PostgreSQL producer counts and the oldest unsent timestamp. Three consecutive samples containing producer `DEAD_LETTER` rows create a SEV-2 producer-delivery incident; three clear samples resolve it and append a `nimbus-system` audit event. Failed database reads are ignored rather than treated as either state. Nimbus never exposes the stored event, row identifiers, or failure reason and does not retry, delete, or replay these rows.
+The console and viewer-authorized `outboxState` query separately report aggregate PostgreSQL producer counts and the oldest unsent timestamp. Three consecutive samples containing producer `DEAD_LETTER` rows or a pending/publishing event at least 60 seconds old create one SEV-2 producer-delivery incident; three healthy samples resolve it and append a `nimbus-system` audit event. Failed database reads and active rows without a usable timestamp are ignored rather than treated as either state. Nimbus never exposes the stored event, row identifiers, or failure reason and does not retry, delete, or replay these rows.
 
 Inspect queue depths and dead-letter messages at `http://localhost:15672` with the local-only `nimbus` / `nimbus-local` Compose credential, or list queue state directly:
 
