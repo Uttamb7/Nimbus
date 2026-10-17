@@ -2,7 +2,7 @@
 
 Nimbus begins with seven Node.js processes behind real HTTP boundaries. The gateway validates identity and sends orders to the orchestrator. The orchestrator reserves inventory synchronously, then dispatches an `order.created` event to three consumers asynchronously.
 
-Every outbound call reports its measured status and duration to the control plane. The topology engine aggregates those observations into queryable dependency edges; it does not use hard-coded edges.
+Every outbound call reports its measured status and duration to the control plane. The topology engine aggregates those observations into queryable dependency edges; it does not use hard-coded edges. Edges expire five minutes after their latest observation so graph, path, and incident blast-radius reads represent current traffic. A later observation starts a fresh aggregate instead of mixing expired measurements into the live edge.
 
 ```text
 gateway -> identity-api
