@@ -28,14 +28,16 @@ test("console polls until subscriptions are ready, resyncs after reconnect, and 
   const liveCount = refreshed;
   t.mock.timers.tick(6_000); await flush();
   assert.equal(refreshed, liveCount);
+  t.mock.timers.tick(54_000); t.mock.timers.tick(1_000); await flush();
+  assert.equal(refreshed, liveCount + 1, "quiet live state should reconcile every minute");
   for (let i = 0; i < 100; i++) sinks[0].next({ data: { serviceHealthChanged: { name: "gateway" } } });
   t.mock.timers.tick(1_000); await flush();
-  assert.equal(refreshed, liveCount + 1, "burst should coalesce into one snapshot");
+  assert.equal(refreshed, liveCount + 2, "burst should coalesce into one snapshot");
 
   options.on.closed();
   assert.equal(states.at(-1), "RECONNECTING · POLLING");
   t.mock.timers.tick(3_000); t.mock.timers.tick(1_000); await flush();
-  assert.equal(refreshed, liveCount + 2);
+  assert.equal(refreshed, liveCount + 3);
   for (const sink of sinks) sink.next({ data: {} });
   t.mock.timers.tick(1_000); await flush();
   assert.equal(states.at(-1), "LIVE");

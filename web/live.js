@@ -2,7 +2,7 @@ export const retryDelay = (attempt, random = Math.random) => Math.min(30_000, 50
 
 export function connectLive({ createClient, url, authorization, refresh, onState }) {
   const ready = new Set();
-  let stopped = false, polling, refreshTimer, retryTimer, retryResolve, pongTimer;
+  let stopped = false, polling, reconciliation, refreshTimer, retryTimer, retryResolve, pongTimer;
   let updating = false, dirty = false, status = "CONNECTING · POLLING";
   const show = (value) => { status = value; onState(value); };
   const poll = () => { polling ??= setInterval(requestRefresh, 3_000); };
@@ -19,10 +19,14 @@ export function connectLive({ createClient, url, authorization, refresh, onState
       await refresh();
       if (!stopped && ready.size === 3) {
         clearInterval(polling); polling = undefined;
+        reconciliation ??= setInterval(requestRefresh, 60_000);
         show("LIVE");
       } else if (!stopped) onState(status);
     } catch {
-      if (!stopped) { poll(); onState("DATA UNAVAILABLE · RETRYING"); }
+      if (!stopped) {
+        clearInterval(reconciliation); reconciliation = undefined;
+        poll(); onState("DATA UNAVAILABLE · RETRYING");
+      }
     } finally {
       updating = false;
       if (dirty) { dirty = false; requestRefresh(); }
@@ -32,6 +36,7 @@ export function connectLive({ createClient, url, authorization, refresh, onState
     if (stopped) return;
     ready.clear();
     clearTimeout(pongTimer);
+    clearInterval(reconciliation); reconciliation = undefined;
     poll();
     show("RECONNECTING · POLLING");
   }
@@ -60,6 +65,7 @@ export function connectLive({ createClient, url, authorization, refresh, onState
   function unavailable() {
     if (stopped) return;
     ready.clear();
+    clearInterval(reconciliation); reconciliation = undefined;
     poll();
     show("SUBSCRIPTIONS UNAVAILABLE · POLLING");
   }
@@ -72,6 +78,7 @@ export function connectLive({ createClient, url, authorization, refresh, onState
       if (stopped) return;
       stopped = true;
       clearInterval(polling);
+      clearInterval(reconciliation);
       for (const timer of [refreshTimer, retryTimer, pongTimer]) clearTimeout(timer);
       retryResolve?.();
       for (const stop of stopSubscriptions) stop();
