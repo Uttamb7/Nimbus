@@ -14,8 +14,8 @@ export class Operations {
   #outboxViolations = 0;
   #outboxRecoveries = 0;
 
-  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, queueWindows = 3, outboxWindows = 3, outboxDelayMs = 60_000, now = () => Date.now(), history = new History() } = {}) {
-    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, queueWindows, outboxWindows, outboxDelayMs, now, history });
+  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, queueWindows = 3, outboxWindows = 3, outboxDelayMs = 60_000, sampleMaxAgeMs = 5 * 60_000, now = () => Date.now(), history = new History() } = {}) {
+    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, queueWindows, outboxWindows, outboxDelayMs, sampleMaxAgeMs, now, history });
   }
 
   async observeQueue(queue, service) {
@@ -181,11 +181,20 @@ export class Operations {
   }
 
   metrics(service) {
-    const samples = this.#samples.get(service) || [];
+    const sampledAt = this.now();
+    const stored = this.#samples.get(service) || [];
+    const samples = stored.filter((sample) => sampledAt - sample.at <= this.sampleMaxAgeMs);
+    if (samples.length !== stored.length) {
+      if (samples.length) this.#samples.set(service, samples);
+      else this.#samples.delete(service);
+      this.#violations.delete(service);
+      this.#recoveries.delete(service);
+      this.#baselines.delete(service);
+    }
     const durations = samples.map((sample) => sample.durationMs).sort((a, b) => a - b);
     const errors = samples.filter((sample) => sample.status === 0 || sample.status >= 500).length;
     const availability = samples.length ? 1 - errors / samples.length : 0;
-    const elapsedSeconds = samples.length > 1 ? Math.max(1, (this.now() - samples[0].at) / 1000) : 1;
+    const elapsedSeconds = samples.length > 1 ? Math.max(1, (sampledAt - samples[0].at) / 1000) : 1;
     const errorRate = samples.length ? errors / samples.length : 0;
     const p95LatencyMs = percentile(durations, 0.95);
     const health = !samples.length ? "UNKNOWN" : samples.length >= this.minSamples && (errorRate > this.errorRateLimit || p95LatencyMs > this.p95LimitMs) ? "CRITICAL" : errorRate > 0 || p95LatencyMs > this.p95LimitMs * 0.75 ? "DEGRADED" : "HEALTHY";

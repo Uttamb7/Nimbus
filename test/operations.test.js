@@ -37,6 +37,43 @@ test("error budget burn rate follows the measured sample window", async () => {
   assert.equal(operations.metrics("gateway").errorBudgetBurnRate, 1);
 });
 
+test("service metrics expire stale samples and restart detection state", async () => {
+  let now = 0;
+  const operations = new Operations({
+    minSamples: 2, consecutiveWindows: 2, errorRateLimit: 0.2,
+    sampleMaxAgeMs: 100, now: () => now,
+  });
+  const failed = { source: "gateway", status: 500, durationMs: 900 };
+
+  await operations.observe(failed);
+  now = 100;
+  await operations.observe(failed);
+  assert.equal(operations.metrics("gateway").requestCount, 2);
+
+  now = 101;
+  const current = operations.metrics("gateway");
+  assert.equal(current.requestCount, 1);
+  assert.equal(current.errorRate, 1);
+  assert.equal(current.p95LatencyMs, 900);
+  assert.equal(current.health, "DEGRADED");
+  now = 201;
+  assert.deepEqual(operations.metrics("gateway"), {
+    requestCount: 0, requestRate: 0, errorRate: 0,
+    p50LatencyMs: 0, p95LatencyMs: 0, p99LatencyMs: 0,
+    availability: 0, sloCompliance: false, errorBudgetRemaining: 0,
+    errorBudgetBurnRate: 0, health: "UNKNOWN",
+  });
+
+  now = 202;
+  await operations.observe(failed);
+  now = 203;
+  await operations.observe(failed);
+  assert.equal((await operations.incidents()).length, 0);
+  now = 204;
+  await operations.observe(failed);
+  assert.equal((await operations.incidents()).length, 1);
+});
+
 test("incident captures the last measured compliant window", async () => {
   const operations = new Operations({ minSamples: 2, consecutiveWindows: 2, errorRateLimit: 0.2 });
   for (let index = 0; index < 2; index++) {
