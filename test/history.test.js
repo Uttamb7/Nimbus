@@ -16,6 +16,23 @@ test("history preserves incident lifecycle and append-only audit records", async
   assert.equal(await history.createIncident({ ...incident, id: "ae5cc18f-8fa1-42d9-9c53-5ac7da820983" }), null);
 });
 
+test("history keeps distinct active triggers for the same service", async () => {
+  const history = new History();
+  const metric = { id: "metric", severity: "SEV2", status: "OPEN", title: "payment-worker is unhealthy", suspectedService: "payment-worker", triggerCondition: "error rate exceeded 5%", createdAt: "2026-10-20T12:00:00.000Z", acknowledgedAt: null, resolvedAt: null };
+  const queue = { ...metric, id: "queue", title: "payment-worker event consumer is stalled", triggerCondition: "nimbus.payment-worker has ready messages with no consumers" };
+
+  assert.equal((await history.createIncident(metric)).id, "metric");
+  assert.equal((await history.createIncident(queue)).id, "queue");
+  assert.equal(await history.createIncident({ ...metric, id: "duplicate" }), null);
+
+  await history.resolveRecoveredIncident(metric.suspectedService, metric.triggerCondition, {
+    id: "audit", timestamp: "2026-10-20T12:01:00.000Z", actor: "nimbus-system",
+    action: "incident.resolved", resource: "incident", metadata: "{}",
+  });
+  assert.equal((await history.incident("metric")).status, "RESOLVED");
+  assert.equal((await history.incident("queue")).status, "OPEN");
+});
+
 test("history persists and maps incident evidence", async () => {
   let parameters;
   const row = {

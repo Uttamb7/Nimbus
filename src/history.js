@@ -44,7 +44,7 @@ export class History {
 
   async createIncident(incident) {
     if (!this.pool) {
-      if (this.#incidents.some((value) => value.suspectedService === incident.suspectedService && value.status !== "RESOLVED")) return null;
+      if (this.#incidents.some((value) => value.suspectedService === incident.suspectedService && value.triggerCondition === incident.triggerCondition && value.status !== "RESOLVED")) return null;
       this.#incidents.unshift({ ...incident });
       this.events.publish("incidentChanged", { ...incident });
       return { ...incident };
