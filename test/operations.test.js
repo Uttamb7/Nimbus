@@ -177,6 +177,48 @@ test("sustained stalled consumer opens and recovers one queue incident", async (
   assert.equal((await history.incidents()).length, 2);
 });
 
+test("stuck unacknowledged deliveries open and recover one matching incident", async () => {
+  let now = 1_000;
+  const history = new History();
+  const operations = new Operations({ history, queueWindows: 2, now: () => now++ });
+  const stuck = {
+    name: "nimbus.payment-worker", ready: 0, unacknowledged: 2, consumers: 1, ackRate: 0,
+  };
+  const progressing = { ...stuck, ackRate: 0.5 };
+
+  await operations.observeQueue(stuck, "payment-worker");
+  await operations.observeQueue(progressing, "payment-worker");
+  await operations.observeQueue(stuck, "payment-worker");
+  assert.equal((await history.incidents()).length, 0);
+  await operations.observeQueue(stuck, "payment-worker");
+  await operations.observeQueue(stuck, "payment-worker");
+
+  const [incident] = await history.incidents();
+  assert.equal(incident.status, "OPEN");
+  assert.match(incident.triggerCondition, /acknowledgement progress/);
+  assert.deepEqual(incident.evidence, {
+    queueReady: 0, queueUnacknowledged: 2, queueConsumers: 1,
+  });
+  assert.equal((await history.incidents()).length, 1);
+
+  await operations.observeQueue(progressing, "payment-worker");
+  await operations.observeQueue(stuck, "payment-worker");
+  await operations.observeQueue(progressing, "payment-worker");
+  assert.equal((await history.incident(incident.id)).status, "OPEN");
+  await operations.observeQueue({ ...stuck, unacknowledged: 0 }, "payment-worker");
+  assert.equal((await history.incident(incident.id)).status, "RESOLVED");
+  const [audit] = await history.auditLog();
+  assert.deepEqual(
+    { actor: audit.actor, action: audit.action, resourceId: audit.resourceId },
+    { actor: "nimbus-system", action: "incident.resolved", resourceId: incident.id },
+  );
+  assert.deepEqual(JSON.parse(audit.metadata), {
+    reason: "queue acknowledgements recovered",
+    queue: stuck.name,
+    consecutiveWindows: 2,
+  });
+});
+
 test("sustained dead-letter backlog opens and recovers one delivery incident", async () => {
   let now = 1_000;
   const history = new History();

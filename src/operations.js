@@ -11,6 +11,8 @@ export class Operations {
   #baselines = new Map();
   #queueViolations = new Map();
   #queueRecoveries = new Map();
+  #deliveryViolations = new Map();
+  #deliveryRecoveries = new Map();
   #outboxViolations = 0;
   #outboxRecoveries = 0;
 
@@ -19,6 +21,7 @@ export class Operations {
   }
 
   async observeQueue(queue, service) {
+    const deliveryIncident = await this.#observeDeliveryProgress(queue, service);
     const stalled = queue.ready > 0 && queue.consumers === 0;
     const recovered = queue.ready === 0 && queue.consumers > 0;
     const violations = stalled ? (this.#queueViolations.get(queue.name) || 0) + 1 : 0;
@@ -46,11 +49,50 @@ export class Operations {
       this.#queueRecoveries.set(queue.name, 0);
       const active = (await this.history.incidents()).find((incident) =>
         incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
-      if (!active) return null;
+      if (!active) return deliveryIncident;
       const timestamp = new Date(this.now()).toISOString();
       return this.history.resolveRecoveredIncident(service, triggerCondition, Object.freeze({
         id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
         resource: "incident", metadata: JSON.stringify({ reason: "queue consumer recovered", queue: queue.name, consecutiveWindows: this.queueWindows }),
+      }));
+    }
+    return deliveryIncident;
+  }
+
+  async #observeDeliveryProgress(queue, service) {
+    if (!Number.isFinite(queue.ackRate)) return null;
+    const stalled = queue.consumers > 0 && queue.unacknowledged > 0 && queue.ackRate === 0;
+    const recovered = queue.unacknowledged === 0 || queue.ackRate > 0;
+    const violations = stalled ? (this.#deliveryViolations.get(queue.name) || 0) + 1 : 0;
+    const recoveries = recovered ? (this.#deliveryRecoveries.get(queue.name) || 0) + 1 : 0;
+    this.#deliveryViolations.set(queue.name, Math.min(violations, this.queueWindows));
+    this.#deliveryRecoveries.set(queue.name, Math.min(recoveries, this.queueWindows));
+    const triggerCondition = `${queue.name} has unacknowledged messages without acknowledgement progress`;
+
+    if (violations >= this.queueWindows) {
+      this.#deliveryRecoveries.set(queue.name, 0);
+      return this.history.createIncident({
+        id: randomUUID(), severity: "SEV2", status: "OPEN",
+        title: `${service} event deliveries are stuck`, suspectedService: service,
+        affectedServices: [service], triggerCondition,
+        evidence: {
+          queueReady: queue.ready,
+          queueUnacknowledged: queue.unacknowledged,
+          queueConsumers: queue.consumers,
+        },
+        baseline: null, createdAt: new Date(this.now()).toISOString(),
+        acknowledgedAt: null, resolvedAt: null,
+      });
+    }
+    if (recoveries >= this.queueWindows) {
+      this.#deliveryRecoveries.set(queue.name, 0);
+      const active = (await this.history.incidents()).find((incident) =>
+        incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
+      if (!active) return null;
+      const timestamp = new Date(this.now()).toISOString();
+      return this.history.resolveRecoveredIncident(service, triggerCondition, Object.freeze({
+        id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
+        resource: "incident", metadata: JSON.stringify({ reason: "queue acknowledgements recovered", queue: queue.name, consecutiveWindows: this.queueWindows }),
       }));
     }
     return null;

@@ -18,6 +18,8 @@ After an incident exists, Nimbus resolves it automatically only after three cons
 
 Stop `payment-worker`, then submit or republish an order event. Nimbus exposes the retained ready message immediately and creates one incident after three consecutive two-second samples report ready work with no consumer. Restart the worker; after the queue drains and three samples report a consumer with no ready work, Nimbus resolves the incident and records the recovery. Detection does not restart the worker or process the message itself.
 
+Nimbus also detects an attached consumer that holds unacknowledged deliveries without reporting any acknowledgement rate for three samples. Any acknowledgement progress resets detection; three consecutive progressing or empty samples resolve only that matching incident. This uses aggregate RabbitMQ statistics and never inspects or replays message content.
+
 ## Dead-lettered event
 
 After a consumer exhausts its five attempts, RabbitMQ retains the rejected message in `nimbus.dead-letter`. Three consecutive non-empty samples create one event-delivery incident. Inspect and handle the failed message through RabbitMQ operations; Nimbus does not expose its payload or replay it. After the queue is empty for three consecutive samples, Nimbus resolves the incident and records the recovery.
