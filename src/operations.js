@@ -15,6 +15,8 @@ export class Operations {
   #deliveryRecoveries = new Map();
   #backlogViolations = new Map();
   #backlogRecoveries = new Map();
+  #idleViolations = new Map();
+  #idleRecoveries = new Map();
   #outboxViolations = 0;
   #outboxRecoveries = 0;
 
@@ -25,6 +27,7 @@ export class Operations {
   async observeQueue(queue, service) {
     const deliveryIncident = await this.#observeDeliveryProgress(queue, service);
     const backlogIncident = await this.#observeBacklogGrowth(queue, service);
+    const idleIncident = await this.#observeIdleConsumer(queue, service);
     const stalled = queue.ready > 0 && queue.consumers === 0;
     const recovered = queue.ready === 0 && queue.consumers > 0;
     const violations = stalled ? (this.#queueViolations.get(queue.name) || 0) + 1 : 0;
@@ -52,14 +55,54 @@ export class Operations {
       this.#queueRecoveries.set(queue.name, 0);
       const active = (await this.history.incidents()).find((incident) =>
         incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
-      if (!active) return deliveryIncident || backlogIncident;
+      if (!active) return deliveryIncident || backlogIncident || idleIncident;
       const timestamp = new Date(this.now()).toISOString();
       return this.history.resolveRecoveredIncident(service, triggerCondition, Object.freeze({
         id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
         resource: "incident", metadata: JSON.stringify({ reason: "queue consumer recovered", queue: queue.name, consecutiveWindows: this.queueWindows }),
       }));
     }
-    return deliveryIncident || backlogIncident;
+    return deliveryIncident || backlogIncident || idleIncident;
+  }
+
+  async #observeIdleConsumer(queue, service) {
+    if (!Number.isFinite(queue.ackRate)) return null;
+    const idle = queue.ready > 0 && queue.consumers > 0 && queue.unacknowledged === 0 && queue.ackRate === 0;
+    const recovering = queue.ready === 0 || queue.unacknowledged > 0 || queue.ackRate > 0;
+    const violations = idle ? (this.#idleViolations.get(queue.name) || 0) + 1 : 0;
+    const recoveries = recovering ? (this.#idleRecoveries.get(queue.name) || 0) + 1 : 0;
+    this.#idleViolations.set(queue.name, Math.min(violations, this.queueWindows));
+    this.#idleRecoveries.set(queue.name, Math.min(recoveries, this.queueWindows));
+    const triggerCondition = `${queue.name} has ready messages that its consumer is not accepting`;
+
+    if (violations >= this.queueWindows) {
+      this.#idleRecoveries.set(queue.name, 0);
+      return this.history.createIncident({
+        id: randomUUID(), severity: "SEV2", status: "OPEN",
+        title: `${service} event consumer is idle`, suspectedService: service,
+        affectedServices: [service], triggerCondition,
+        evidence: {
+          queueReady: queue.ready,
+          queueUnacknowledged: queue.unacknowledged,
+          queueConsumers: queue.consumers,
+          queueAckRate: queue.ackRate,
+        },
+        baseline: null, createdAt: new Date(this.now()).toISOString(),
+        acknowledgedAt: null, resolvedAt: null,
+      });
+    }
+    if (recoveries >= this.queueWindows) {
+      this.#idleRecoveries.set(queue.name, 0);
+      const active = (await this.history.incidents()).find((incident) =>
+        incident.status !== "RESOLVED" && incident.suspectedService === service && incident.triggerCondition === triggerCondition);
+      if (!active) return null;
+      const timestamp = new Date(this.now()).toISOString();
+      return this.history.resolveRecoveredIncident(service, triggerCondition, Object.freeze({
+        id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
+        resource: "incident", metadata: JSON.stringify({ reason: "queue consumer accepted work", queue: queue.name, consecutiveWindows: this.queueWindows }),
+      }));
+    }
+    return null;
   }
 
   async #observeBacklogGrowth(queue, service) {

@@ -20,6 +20,8 @@ Stop `payment-worker`, then submit or republish an order event. Nimbus exposes t
 
 Nimbus also detects an attached consumer that holds unacknowledged deliveries without reporting any acknowledgement rate for three samples. Any acknowledgement progress resets detection; three consecutive progressing or empty samples resolve only that matching incident. This uses aggregate RabbitMQ statistics and never inspects or replays message content.
 
+If a consumer remains attached but accepts none of the ready work, three samples with no in-flight delivery or acknowledgement progress create a separate incident. An empty queue, an in-flight delivery, or acknowledgement progress resolves only that signal after three samples. Nimbus reports the condition but does not restart the consumer or move the queued messages.
+
 ## Dead-lettered event
 
 After a consumer exhausts its five attempts, RabbitMQ retains the rejected message in `nimbus.dead-letter`. Three consecutive non-empty samples create one event-delivery incident. Inspect and handle the failed message through RabbitMQ operations; Nimbus does not expose its payload or replay it. After the queue is empty for three consecutive samples, Nimbus resolves the incident and records the recovery.

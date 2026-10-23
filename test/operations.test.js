@@ -219,6 +219,48 @@ test("stuck unacknowledged deliveries open and recover one matching incident", a
   });
 });
 
+test("idle consumer with ready work opens and recovers only its matching incident", async () => {
+  let now = 1_000;
+  const history = new History();
+  const operations = new Operations({ history, queueWindows: 2, now: () => now++ });
+  const idle = {
+    name: "nimbus.payment-worker", ready: 3, unacknowledged: 0, consumers: 1,
+    publishRate: 0, ackRate: 0,
+  };
+  const progressing = { ...idle, ackRate: 0.5 };
+  const inFlight = { ...idle, ready: 2, unacknowledged: 1 };
+
+  await operations.observeQueue(idle, "payment-worker");
+  await operations.observeQueue(progressing, "payment-worker");
+  await operations.observeQueue(idle, "payment-worker");
+  assert.equal((await history.incidents()).length, 0);
+  await operations.observeQueue(idle, "payment-worker");
+  await operations.observeQueue(idle, "payment-worker");
+
+  const [incident] = await history.incidents();
+  assert.equal(incident.status, "OPEN");
+  assert.match(incident.triggerCondition, /not accepting/);
+  assert.deepEqual(incident.evidence, {
+    queueReady: 3, queueUnacknowledged: 0, queueConsumers: 1, queueAckRate: 0,
+  });
+
+  await operations.observeQueue(progressing, "payment-worker");
+  await operations.observeQueue(idle, "payment-worker");
+  assert.equal((await history.incident(incident.id)).status, "OPEN");
+  await operations.observeQueue(inFlight, "payment-worker");
+  await operations.observeQueue(inFlight, "payment-worker");
+
+  const incidents = await history.incidents();
+  assert.equal((await history.incident(incident.id)).status, "RESOLVED");
+  assert.equal(incidents.filter((item) => item.triggerCondition === incident.triggerCondition).length, 1);
+  assert.equal(incidents.filter((item) => item.status === "OPEN").length, 1);
+  assert.match(incidents.find((item) => item.status === "OPEN").triggerCondition, /acknowledgement progress/);
+  const [audit] = await history.auditLog();
+  assert.deepEqual(JSON.parse(audit.metadata), {
+    reason: "queue consumer accepted work", queue: idle.name, consecutiveWindows: 2,
+  });
+});
+
 test("growing consumer backlog opens and recovers one matching incident", async () => {
   let now = 1_000;
   const history = new History();
