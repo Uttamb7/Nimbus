@@ -219,6 +219,43 @@ test("stuck unacknowledged deliveries open and recover one matching incident", a
   });
 });
 
+test("growing consumer backlog opens and recovers one matching incident", async () => {
+  let now = 1_000;
+  const history = new History();
+  const operations = new Operations({ history, queueWindows: 2, now: () => now++ });
+  const growing = {
+    name: "nimbus.payment-worker", ready: 3, unacknowledged: 1, consumers: 1,
+    publishRate: 2, ackRate: 1,
+  };
+  const keepingPace = { ...growing, publishRate: 1 };
+
+  await operations.observeQueue(growing, "payment-worker");
+  await operations.observeQueue(keepingPace, "payment-worker");
+  await operations.observeQueue(growing, "payment-worker");
+  assert.equal((await history.incidents()).length, 0);
+  await operations.observeQueue(growing, "payment-worker");
+  await operations.observeQueue(growing, "payment-worker");
+
+  const [incident] = await history.incidents();
+  assert.equal(incident.status, "OPEN");
+  assert.match(incident.triggerCondition, /publishes faster/);
+  assert.deepEqual(incident.evidence, {
+    queueReady: 3, queueUnacknowledged: 1, queueConsumers: 1,
+    queuePublishRate: 2, queueAckRate: 1,
+  });
+
+  await operations.observeQueue(keepingPace, "payment-worker");
+  await operations.observeQueue(growing, "payment-worker");
+  await operations.observeQueue(keepingPace, "payment-worker");
+  assert.equal((await history.incident(incident.id)).status, "OPEN");
+  await operations.observeQueue({ ...keepingPace, ready: 0 }, "payment-worker");
+  assert.equal((await history.incident(incident.id)).status, "RESOLVED");
+  const [audit] = await history.auditLog();
+  assert.deepEqual(JSON.parse(audit.metadata), {
+    reason: "queue backlog recovered", queue: growing.name, consecutiveWindows: 2,
+  });
+});
+
 test("sustained dead-letter backlog opens and recovers one delivery incident", async () => {
   let now = 1_000;
   const history = new History();

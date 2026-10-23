@@ -12,15 +12,15 @@ test("queue monitor maps only bounded Nimbus queue state", async () => {
       requested = { url, options };
       return new Response(JSON.stringify([
         { name: "other", messages_ready: 99, messages_unacknowledged: 0, consumers: 0 },
-        { name: "nimbus.payment-worker", messages_ready: 3, messages_unacknowledged: 1, consumers: 0, message_stats: { ack_details: { rate: 1.5 } } },
+        { name: "nimbus.payment-worker", messages_ready: 3, messages_unacknowledged: 1, consumers: 0, message_stats: { ack_details: { rate: 1.5 }, publish_details: { rate: 2.5 } } },
         { name: "nimbus.dead-letter", messages_ready: 2, messages_unacknowledged: 0, consumers: 0 },
       ]));
     },
   });
 
   assert.deepEqual(await queues.list(), [
-    { name: "nimbus.dead-letter", ready: 2, unacknowledged: 0, consumers: 0, ackRate: 0 },
-    { name: "nimbus.payment-worker", ready: 3, unacknowledged: 1, consumers: 0, ackRate: 1.5 },
+    { name: "nimbus.dead-letter", ready: 2, unacknowledged: 0, consumers: 0, ackRate: 0, publishRate: 0 },
+    { name: "nimbus.payment-worker", ready: 3, unacknowledged: 1, consumers: 0, ackRate: 1.5, publishRate: 2.5 },
   ]);
   assert.equal(requested.url.href, "http://rabbitmq:15672/api/queues/%2F");
   assert.equal(requested.options.headers.authorization, "Basic bmltYnVzOnNlY3JldA==");
@@ -34,6 +34,7 @@ test("queue monitor isolates configuration, transport, and malformed responses",
   await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response("{}") }).list(), /malformed/);
   await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response('[{"name":"nimbus.dead-letter","messages_ready":-1,"messages_unacknowledged":0,"consumers":0}]') }).list(), /malformed/);
   await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response('[{"name":"nimbus.payment-worker","messages_ready":0,"messages_unacknowledged":1,"consumers":1,"message_stats":{"ack_details":{"rate":-1}}}]') }).list(), /malformed/);
+  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response('[{"name":"nimbus.payment-worker","messages_ready":0,"messages_unacknowledged":1,"consumers":1,"message_stats":{"publish_details":{"rate":-1}}}]') }).list(), /malformed/);
 });
 
 test("queue polling observes only consumer queues and isolates backend failures", async () => {

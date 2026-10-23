@@ -57,16 +57,20 @@ export class Queues {
     const queues = result.filter((queue) => knownQueues.has(queue?.name)).map((queue) => {
       const counts = [queue.messages_ready, queue.messages_unacknowledged, queue.consumers];
       const ackRate = queue.message_stats?.ack_details?.rate ?? 0;
+      const publishRate = queue.message_stats?.publish_details?.rate ?? 0;
       if (counts.some((value) => !Number.isInteger(value) || value < 0)) {
         throw new Error("queue backend returned malformed data");
       }
-      if (!Number.isFinite(ackRate) || ackRate < 0) throw new Error("queue backend returned malformed data");
+      if (![ackRate, publishRate].every((rate) => Number.isFinite(rate) && rate >= 0)) {
+        throw new Error("queue backend returned malformed data");
+      }
       return {
         name: queue.name,
         ready: queue.messages_ready,
         unacknowledged: queue.messages_unacknowledged,
         consumers: queue.consumers,
         ackRate,
+        publishRate,
       };
     });
     if (new Set(queues.map((queue) => queue.name)).size !== queues.length) {
