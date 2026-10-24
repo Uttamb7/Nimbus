@@ -87,10 +87,11 @@ test("GraphQL exposes the stored incident snapshot", async () => {
     rootValue: root(topology, operations),
   });
 
-  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [{
+  const expected = {
     affectedServices: ["gateway", "orders"],
     evidence: { requestCount: 1, errorRate: 1, p95LatencyMs: 900, availability: 0 },
-  }]);
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [expected, expected]);
 });
 
 test("GraphQL exposes queue incident evidence without HTTP metric labels", async () => {
@@ -148,7 +149,8 @@ test("GraphQL exposes the measured incident baseline", async () => {
     rootValue: root(new Topology(), operations),
   });
 
-  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [{
+  const expected = {
     baseline: { requestCount: 2, errorRate: 0, p95LatencyMs: 20, availability: 1 },
-  }]);
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [expected, expected]);
 });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { History } from "../src/history.js";
 import { Operations, pollOutbox } from "../src/operations.js";
 
-test("measured failures consume budget and create one incident", async () => {
+test("measured failures consume budget and create trigger-specific incidents", async () => {
   let now = 1_000;
   const operations = new Operations({ minSamples: 2, consecutiveWindows: 2, errorRateLimit: 0.2, now: () => now++ });
   const observation = { source: "gateway", status: 500, durationMs: 900 };
@@ -18,14 +18,17 @@ test("measured failures consume budget and create one incident", async () => {
   assert.equal(metrics.health, "CRITICAL");
   assert.equal(metrics.errorBudgetRemaining, 0);
   const incidents = await operations.incidents();
-  assert.equal(incidents.length, 1);
-  assert.match(incidents[0].triggerCondition, /p95 latency/);
-  assert.deepEqual(incidents[0].affectedServices, ["gateway", "orders", "inventory"]);
-  assert.deepEqual(incidents[0].evidence, {
-    requestCount: 3, errorRate: 1, p50LatencyMs: 900, p95LatencyMs: 900,
-    p99LatencyMs: 900, availability: 0,
-  });
-  assert.equal(incidents[0].baseline, null);
+  assert.deepEqual(incidents.map((incident) => incident.triggerCondition).sort(), [
+    "error rate exceeded 20%", "p95 latency exceeded 800 ms",
+  ]);
+  for (const incident of incidents) {
+    assert.deepEqual(incident.affectedServices, ["gateway", "orders", "inventory"]);
+    assert.deepEqual(incident.evidence, {
+      requestCount: 3, errorRate: 1, p50LatencyMs: 900, p95LatencyMs: 900,
+      p99LatencyMs: 900, availability: 0,
+    });
+    assert.equal(incident.baseline, null);
+  }
 });
 
 test("error budget burn rate follows the measured sample window", async () => {
@@ -71,7 +74,7 @@ test("service metrics expire stale samples and restart detection state", async (
   assert.equal((await operations.incidents()).length, 0);
   now = 204;
   await operations.observe(failed);
-  assert.equal((await operations.incidents()).length, 1);
+  assert.equal((await operations.incidents()).length, 2);
 });
 
 test("incident captures the last measured compliant window", async () => {
@@ -115,6 +118,37 @@ test("sustained measured recovery resolves an incident exactly once", async () =
 
   for (let index = 0; index < 3; index++) await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
   assert.equal((await history.auditLog()).length, 1);
+});
+
+test("latency and error incidents recover independently", async () => {
+  let now = 0;
+  const history = new History();
+  const operations = new Operations({
+    history, minSamples: 1, consecutiveWindows: 2, recoveryWindows: 2,
+    errorRateLimit: 0.2, p95LimitMs: 100, sampleMaxAgeMs: 10, now: () => now,
+  });
+
+  await operations.observe({ source: "gateway", status: 500, durationMs: 200 });
+  await operations.observe({ source: "gateway", status: 500, durationMs: 200 });
+  let incidents = await history.incidents();
+  assert.equal(incidents.filter((incident) => incident.status === "OPEN").length, 2);
+
+  now = 20;
+  await operations.observe({ source: "gateway", status: 500, durationMs: 10 });
+  now = 21;
+  await operations.observe({ source: "gateway", status: 500, durationMs: 10 });
+  incidents = await history.incidents();
+  assert.equal(incidents.find((incident) => incident.triggerCondition.startsWith("p95")).status, "RESOLVED");
+  assert.equal(incidents.find((incident) => incident.triggerCondition.startsWith("error")).status, "OPEN");
+  assert.equal((await history.auditLog()).length, 1);
+
+  now = 40;
+  await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  now = 41;
+  await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
+  incidents = await history.incidents();
+  assert.equal(incidents.filter((incident) => incident.status === "RESOLVED").length, 2);
+  assert.equal((await history.auditLog()).length, 2);
 });
 
 test("measured recovery cannot resolve a queue incident for the same service", async () => {

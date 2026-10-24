@@ -48,7 +48,7 @@ test("GraphQL WebSocket authenticates all roles and returns state-change payload
   assert.deepEqual((await incidents.next()).value.data, { incidentChanged: null });
   await operations.observe({ source: "gateway", destination: "inventory-api", status: 200, durationMs: 10 });
   assert.equal((await health.next()).value.data.serviceHealthChanged.health, "HEALTHY");
-  const observation = { source: "gateway", destination: "inventory-api", status: 503, durationMs: 900 };
+  const observation = { source: "gateway", destination: "inventory-api", status: 503, durationMs: 10 };
   topology.observe(observation);
   await operations.observe(observation, { affectedServices: ["gateway", "inventory-api"] });
   const service = (await health.next()).value.data.serviceHealthChanged;

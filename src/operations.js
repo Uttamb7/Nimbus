@@ -3,6 +3,7 @@ import { History } from "./history.js";
 
 const percentile = (values, fraction) => values.length ? values[Math.max(0, Math.ceil(values.length * fraction) - 1)] : 0;
 const evidence = ({ requestCount, errorRate, p50LatencyMs, p95LatencyMs, p99LatencyMs, availability }) => ({ requestCount, errorRate, p50LatencyMs, p95LatencyMs, p99LatencyMs, availability });
+const metricKey = (service, triggerCondition) => `${service}\0${triggerCondition}`;
 
 export class Operations {
   #samples = new Map();
@@ -278,35 +279,42 @@ export class Operations {
 
     const metrics = this.metrics(observation.source);
     this.history.events.publish("serviceHealthChanged", { name: observation.source, metrics });
-    const violated = metrics.requestCount >= this.minSamples && (metrics.p95LatencyMs > this.p95LimitMs || metrics.errorRate > this.errorRateLimit);
-    const metricTriggers = [`p95 latency exceeded ${this.p95LimitMs} ms`, `error rate exceeded ${this.errorRateLimit * 100}%`];
-    if (!violated && metrics.requestCount >= this.minSamples) this.#baselines.set(observation.source, evidence(metrics));
-    const count = violated ? (this.#violations.get(observation.source) || 0) + 1 : 0;
-    this.#violations.set(observation.source, count);
-    this.#recoveries.set(observation.source, !violated && metrics.requestCount >= this.minSamples ? (this.#recoveries.get(observation.source) || 0) + 1 : 0);
-    if (count >= this.consecutiveWindows) {
-      this.#recoveries.set(observation.source, 0);
-      const reason = metrics.p95LatencyMs > this.p95LimitMs ? `p95 latency exceeded ${this.p95LimitMs} ms` : `error rate exceeded ${this.errorRateLimit * 100}%`;
-      const incident = {
-        id: randomUUID(), severity: "SEV2", status: "OPEN",
-        title: `${observation.source} is unhealthy`, suspectedService: observation.source,
-        affectedServices: [...affectedServices], triggerCondition: reason,
-        evidence: evidence(metrics), baseline: this.#baselines.get(observation.source) || null,
-        createdAt: new Date(this.now()).toISOString(), acknowledgedAt: null, resolvedAt: null,
-      };
-      return this.history.createIncident(incident);
+    const ready = metrics.requestCount >= this.minSamples;
+    const states = [
+      { triggerCondition: `p95 latency exceeded ${this.p95LimitMs} ms`, violated: ready && metrics.p95LatencyMs > this.p95LimitMs },
+      { triggerCondition: `error rate exceeded ${this.errorRateLimit * 100}%`, violated: ready && metrics.errorRate > this.errorRateLimit },
+    ];
+    if (ready && states.every((state) => !state.violated)) this.#baselines.set(observation.source, evidence(metrics));
+
+    const changes = [];
+    for (const { triggerCondition, violated } of states) {
+      const key = metricKey(observation.source, triggerCondition);
+      const violations = violated ? (this.#violations.get(key) || 0) + 1 : 0;
+      const recoveries = ready && !violated ? (this.#recoveries.get(key) || 0) + 1 : 0;
+      this.#violations.set(key, Math.min(violations, this.consecutiveWindows));
+      this.#recoveries.set(key, Math.min(recoveries, this.recoveryWindows));
+      if (violations >= this.consecutiveWindows) {
+        this.#recoveries.set(key, 0);
+        changes.push(await this.history.createIncident({
+          id: randomUUID(), severity: "SEV2", status: "OPEN",
+          title: `${observation.source} is unhealthy`, suspectedService: observation.source,
+          affectedServices: [...affectedServices], triggerCondition,
+          evidence: evidence(metrics), baseline: this.#baselines.get(observation.source) || null,
+          createdAt: new Date(this.now()).toISOString(), acknowledgedAt: null, resolvedAt: null,
+        }));
+      } else if (recoveries >= this.recoveryWindows) {
+        this.#recoveries.set(key, 0);
+        const active = (await this.history.incidents()).find((incident) =>
+          incident.status !== "RESOLVED" && incident.suspectedService === observation.source && incident.triggerCondition === triggerCondition);
+        if (!active) continue;
+        const timestamp = new Date(this.now()).toISOString();
+        changes.push(await this.history.resolveRecoveredIncident(observation.source, triggerCondition, Object.freeze({
+          id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
+          resource: "incident", metadata: JSON.stringify({ reason: "measured recovery", consecutiveWindows: this.recoveryWindows }),
+        })));
+      }
     }
-    if (this.#recoveries.get(observation.source) >= this.recoveryWindows) {
-      this.#recoveries.set(observation.source, 0);
-      const active = (await this.history.incidents()).find((incident) =>
-        incident.status !== "RESOLVED" && incident.suspectedService === observation.source && metricTriggers.includes(incident.triggerCondition));
-      if (!active) return null;
-      const timestamp = new Date(this.now()).toISOString();
-      return this.history.resolveRecoveredIncident(observation.source, active.triggerCondition, Object.freeze({
-        id: randomUUID(), timestamp, actor: "nimbus-system", action: "incident.resolved",
-        resource: "incident", metadata: JSON.stringify({ reason: "measured recovery", consecutiveWindows: this.recoveryWindows }),
-      }));
-    }
+    return changes.find(Boolean) || null;
   }
 
   metrics(service) {
@@ -316,8 +324,10 @@ export class Operations {
     if (samples.length !== stored.length) {
       if (samples.length) this.#samples.set(service, samples);
       else this.#samples.delete(service);
-      this.#violations.delete(service);
-      this.#recoveries.delete(service);
+      for (const triggerCondition of [`p95 latency exceeded ${this.p95LimitMs} ms`, `error rate exceeded ${this.errorRateLimit * 100}%`]) {
+        this.#violations.delete(metricKey(service, triggerCondition));
+        this.#recoveries.delete(metricKey(service, triggerCondition));
+      }
       this.#baselines.delete(service);
     }
     const durations = samples.map((sample) => sample.durationMs).sort((a, b) => a - b);
