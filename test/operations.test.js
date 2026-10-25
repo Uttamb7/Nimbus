@@ -19,14 +19,17 @@ test("measured failures consume budget and create trigger-specific incidents", a
   assert.equal(metrics.errorBudgetRemaining, 0);
   const incidents = await operations.incidents();
   assert.deepEqual(incidents.map((incident) => incident.triggerCondition).sort(), [
-    "error rate exceeded 20%", "p95 latency exceeded 800 ms",
+    "error budget burn rate exceeded 14.4×", "error rate exceeded 20%",
+    "p95 latency exceeded 800 ms",
   ]);
   for (const incident of incidents) {
     assert.deepEqual(incident.affectedServices, ["gateway", "orders", "inventory"]);
-    assert.deepEqual(incident.evidence, {
+    assert.deepEqual({ ...incident.evidence, errorBudgetBurnRate: undefined }, {
       requestCount: 3, errorRate: 1, p50LatencyMs: 900, p95LatencyMs: 900,
-      p99LatencyMs: 900, availability: 0,
+      p99LatencyMs: 900, availability: 0, errorBudgetRemaining: 0,
+      errorBudgetBurnRate: undefined,
     });
+    assert.ok(incident.evidence.errorBudgetBurnRate > 999);
     assert.equal(incident.baseline, null);
   }
 });
@@ -40,11 +43,72 @@ test("error budget burn rate follows the measured sample window", async () => {
   assert.equal(operations.metrics("gateway").errorBudgetBurnRate, 1);
 });
 
+test("fast error-budget burn opens, deduplicates, and recovers independently", async () => {
+  let now = 1_000;
+  const history = new History();
+  const operations = new Operations({
+    history, availabilityTarget: 0.5, errorBudgetBurnRateLimit: 0.5,
+    errorRateLimit: 0.9, p95LimitMs: 1_000, minSamples: 2,
+    consecutiveWindows: 2, recoveryWindows: 2, now: () => now++,
+  });
+  const healthy = { source: "gateway", status: 200, durationMs: 10 };
+  const failed = { source: "gateway", status: 500, durationMs: 10 };
+
+  await operations.observe(failed);
+  await operations.observe(healthy);
+  await operations.observe(healthy);
+  await operations.observe(failed);
+
+  let incidents = await history.incidents();
+  assert.equal(incidents.length, 1);
+  assert.match(incidents[0].triggerCondition, /error budget burn rate/);
+  assert.equal(incidents[0].status, "OPEN");
+  assert.equal(incidents[0].evidence.errorBudgetBurnRate, 2 / 3);
+  assert.ok(Math.abs(incidents[0].evidence.errorBudgetRemaining - 1 / 3) < 1e-12);
+
+  for (let index = 0; index < 5; index++) await operations.observe(healthy);
+  incidents = await history.incidents();
+  assert.equal(incidents.length, 1);
+  assert.equal(incidents[0].status, "RESOLVED");
+  const [audit] = await history.auditLog();
+  assert.deepEqual(JSON.parse(audit.metadata), {
+    reason: "measured recovery", consecutiveWindows: 2,
+  });
+});
+
+test("expired samples reset fast-burn detection without resolving history", async () => {
+  let now = 0;
+  const history = new History();
+  const operations = new Operations({
+    history, availabilityTarget: 0.5, errorBudgetBurnRateLimit: 0.5,
+    errorRateLimit: 0.9, p95LimitMs: 1_000, minSamples: 2,
+    consecutiveWindows: 2, sampleMaxAgeMs: 10, now: () => now,
+  });
+  const healthy = { source: "gateway", status: 200, durationMs: 10 };
+  const failed = { source: "gateway", status: 500, durationMs: 10 };
+
+  await operations.observe(failed);
+  await operations.observe(healthy);
+  now = 11;
+  operations.metrics("gateway");
+  await operations.observe(failed);
+  now = 12;
+  await operations.observe(healthy);
+  assert.equal((await history.incidents()).length, 0);
+  now = 13;
+  await operations.observe(healthy);
+  assert.equal((await history.incidents()).length, 1);
+
+  now = 30;
+  operations.metrics("gateway");
+  assert.equal((await history.incidents())[0].status, "OPEN");
+});
+
 test("service metrics expire stale samples and restart detection state", async () => {
   let now = 0;
   const operations = new Operations({
     minSamples: 2, consecutiveWindows: 2, errorRateLimit: 0.2,
-    sampleMaxAgeMs: 100, now: () => now,
+    errorBudgetBurnRateLimit: Infinity, sampleMaxAgeMs: 100, now: () => now,
   });
   const failed = { source: "gateway", status: 500, durationMs: 900 };
 
@@ -78,7 +142,7 @@ test("service metrics expire stale samples and restart detection state", async (
 });
 
 test("incident captures the last measured compliant window", async () => {
-  const operations = new Operations({ minSamples: 2, consecutiveWindows: 2, errorRateLimit: 0.2 });
+  const operations = new Operations({ minSamples: 2, consecutiveWindows: 2, errorRateLimit: 0.2, errorBudgetBurnRateLimit: Infinity });
   for (let index = 0; index < 2; index++) {
     await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
   }
@@ -89,11 +153,13 @@ test("incident captures the last measured compliant window", async () => {
   const incident = (await operations.incidents())[0];
   assert.deepEqual(incident.baseline, {
     requestCount: 2, errorRate: 0, p50LatencyMs: 10, p95LatencyMs: 10,
-    p99LatencyMs: 10, availability: 1,
+    p99LatencyMs: 10, availability: 1, errorBudgetRemaining: 1,
+    errorBudgetBurnRate: 0,
   });
   assert.deepEqual(incident.evidence, {
     requestCount: 4, errorRate: 0.5, p50LatencyMs: 10, p95LatencyMs: 900,
-    p99LatencyMs: 900, availability: 0.5,
+    p99LatencyMs: 900, availability: 0.5, errorBudgetRemaining: 0,
+    errorBudgetBurnRate: 0.5 / (1 - 0.999),
   });
 });
 
@@ -101,7 +167,7 @@ test("sustained measured recovery resolves an incident exactly once", async () =
   let now = 1_000;
   const history = new History();
   await history.createIncident({ id: "incident", severity: "SEV2", status: "OPEN", title: "gateway is unhealthy", suspectedService: "gateway", triggerCondition: "error rate exceeded 20%", createdAt: new Date(now++).toISOString(), acknowledgedAt: null, resolvedAt: null });
-  const operations = new Operations({ history, minSamples: 1, errorRateLimit: 0.2, p95LimitMs: 1_000, recoveryWindows: 3, now: () => now++ });
+  const operations = new Operations({ history, minSamples: 1, errorRateLimit: 0.2, errorBudgetBurnRateLimit: Infinity, p95LimitMs: 1_000, recoveryWindows: 3, now: () => now++ });
 
   await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
   await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
@@ -125,7 +191,8 @@ test("latency and error incidents recover independently", async () => {
   const history = new History();
   const operations = new Operations({
     history, minSamples: 1, consecutiveWindows: 2, recoveryWindows: 2,
-    errorRateLimit: 0.2, p95LimitMs: 100, sampleMaxAgeMs: 10, now: () => now,
+    errorRateLimit: 0.2, errorBudgetBurnRateLimit: Infinity,
+    p95LimitMs: 100, sampleMaxAgeMs: 10, now: () => now,
   });
 
   await operations.observe({ source: "gateway", status: 500, durationMs: 200 });

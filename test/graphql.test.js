@@ -83,15 +83,18 @@ test("GraphQL exposes the stored incident snapshot", async () => {
 
   const result = await graphql({
     schema,
-    source: "{ incidents { affectedServices evidence { requestCount errorRate p95LatencyMs availability } } }",
+    source: "{ incidents { affectedServices evidence { requestCount errorRate p95LatencyMs availability errorBudgetRemaining errorBudgetBurnRate } } }",
     rootValue: root(topology, operations),
   });
 
   const expected = {
     affectedServices: ["gateway", "orders"],
-    evidence: { requestCount: 1, errorRate: 1, p95LatencyMs: 900, availability: 0 },
+    evidence: {
+      requestCount: 1, errorRate: 1, p95LatencyMs: 900, availability: 0,
+      errorBudgetRemaining: 0, errorBudgetBurnRate: 1 / (1 - 0.999),
+    },
   };
-  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [expected, expected]);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.data.incidents)), [expected, expected, expected]);
 });
 
 test("GraphQL exposes queue incident evidence without HTTP metric labels", async () => {
@@ -138,7 +141,7 @@ test("GraphQL exposes producer outbox incident evidence", async () => {
 });
 
 test("GraphQL exposes the measured incident baseline", async () => {
-  const operations = new Operations({ minSamples: 2, consecutiveWindows: 1, errorRateLimit: 0.2 });
+  const operations = new Operations({ minSamples: 2, consecutiveWindows: 1, errorRateLimit: 0.2, errorBudgetBurnRateLimit: Infinity });
   await operations.observe({ source: "gateway", status: 200, durationMs: 10 });
   await operations.observe({ source: "gateway", status: 200, durationMs: 20 });
   await operations.observe({ source: "gateway", status: 503, durationMs: 900 });

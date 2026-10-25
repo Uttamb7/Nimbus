@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { History } from "./history.js";
 
 const percentile = (values, fraction) => values.length ? values[Math.max(0, Math.ceil(values.length * fraction) - 1)] : 0;
-const evidence = ({ requestCount, errorRate, p50LatencyMs, p95LatencyMs, p99LatencyMs, availability }) => ({ requestCount, errorRate, p50LatencyMs, p95LatencyMs, p99LatencyMs, availability });
+const evidence = ({ requestCount, errorRate, p50LatencyMs, p95LatencyMs, p99LatencyMs, availability, errorBudgetRemaining, errorBudgetBurnRate }) => ({ requestCount, errorRate, p50LatencyMs, p95LatencyMs, p99LatencyMs, availability, errorBudgetRemaining, errorBudgetBurnRate });
 const metricKey = (service, triggerCondition) => `${service}\0${triggerCondition}`;
 
 export class Operations {
@@ -21,8 +21,8 @@ export class Operations {
   #outboxViolations = 0;
   #outboxRecoveries = 0;
 
-  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, queueWindows = 3, outboxWindows = 3, outboxDelayMs = 60_000, sampleMaxAgeMs = 5 * 60_000, now = () => Date.now(), history = new History() } = {}) {
-    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, minSamples, consecutiveWindows, recoveryWindows, queueWindows, outboxWindows, outboxDelayMs, sampleMaxAgeMs, now, history });
+  constructor({ availabilityTarget = 0.999, p95LimitMs = 800, errorRateLimit = 0.05, errorBudgetBurnRateLimit = 14.4, minSamples = 5, consecutiveWindows = 3, recoveryWindows = 3, queueWindows = 3, outboxWindows = 3, outboxDelayMs = 60_000, sampleMaxAgeMs = 5 * 60_000, now = () => Date.now(), history = new History() } = {}) {
+    Object.assign(this, { availabilityTarget, p95LimitMs, errorRateLimit, errorBudgetBurnRateLimit, minSamples, consecutiveWindows, recoveryWindows, queueWindows, outboxWindows, outboxDelayMs, sampleMaxAgeMs, now, history });
   }
 
   async observeQueue(queue, service) {
@@ -283,6 +283,7 @@ export class Operations {
     const states = [
       { triggerCondition: `p95 latency exceeded ${this.p95LimitMs} ms`, violated: ready && metrics.p95LatencyMs > this.p95LimitMs },
       { triggerCondition: `error rate exceeded ${this.errorRateLimit * 100}%`, violated: ready && metrics.errorRate > this.errorRateLimit },
+      { triggerCondition: `error budget burn rate exceeded ${this.errorBudgetBurnRateLimit}×`, violated: ready && metrics.errorBudgetBurnRate > this.errorBudgetBurnRateLimit },
     ];
     if (ready && states.every((state) => !state.violated)) this.#baselines.set(observation.source, evidence(metrics));
 
@@ -324,7 +325,7 @@ export class Operations {
     if (samples.length !== stored.length) {
       if (samples.length) this.#samples.set(service, samples);
       else this.#samples.delete(service);
-      for (const triggerCondition of [`p95 latency exceeded ${this.p95LimitMs} ms`, `error rate exceeded ${this.errorRateLimit * 100}%`]) {
+      for (const triggerCondition of [`p95 latency exceeded ${this.p95LimitMs} ms`, `error rate exceeded ${this.errorRateLimit * 100}%`, `error budget burn rate exceeded ${this.errorBudgetBurnRateLimit}×`]) {
         this.#violations.delete(metricKey(service, triggerCondition));
         this.#recoveries.delete(metricKey(service, triggerCondition));
       }

@@ -14,7 +14,9 @@ import { connectLive } from "../web/live.js";
 
 async function fixture(t) {
   const topology = new Topology();
-  const operations = new Operations({ minSamples: 1, consecutiveWindows: 1 });
+  const operations = new Operations({
+    minSamples: 1, consecutiveWindows: 1, errorBudgetBurnRateLimit: Infinity,
+  });
   const server = createServer();
   const sockets = attachSubscriptions(server, { topology, operations, authTokens: "read:viewer:Reader,operate:operator:Operator,control:admin:Uttam Bhattarai" });
   server.listen(0, "127.0.0.1");
