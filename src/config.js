@@ -15,6 +15,7 @@ export const config = {
   inventoryUrl: process.env.INVENTORY_URL,
   brokerUrl: process.env.BROKER_URL,
   telemetryUrl: process.env.TELEMETRY_URL,
+  telemetryToken: process.env.TELEMETRY_TOKEN,
   faultStatus,
   demoMode: process.env.DEMO_MODE === "true",
   adminToken: process.env.ADMIN_TOKEN,

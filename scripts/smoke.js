@@ -15,6 +15,7 @@ async function graphql(query, variables, token = "local-viewer") {
 const compose = (args, options = {}) => execFileSync("docker", ["compose", ...args], { encoding: "utf8", ...options });
 const sql = (query) => compose(["exec", "-T", "postgres", "psql", "-U", "nimbus", "-d", "nimbus", "-Atc", query]).trim();
 const brokerNode = (source) => compose(["exec", "-T", "order-orchestrator", "node", "-e", source]).trim();
+const telemetryHeaders = { "content-type": "application/json", authorization: "Bearer local-telemetry" };
 
 async function subscribeUpdates() {
   const socket = new WebSocket("ws://127.0.0.1:4000/graphql/ws", "graphql-transport-ws");
@@ -236,10 +237,16 @@ assert.ok(edges.every((edge) => edge.requestCount > 0 && edge.averageLatencyMs >
 
 const updates = await subscribeUpdates();
 try {
+  const forged = await fetch("http://127.0.0.1:4000/observe", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source: "forged", destination: "inventory-api", status: 503, durationMs: 1_000 }),
+  });
+  assert.equal(forged.status, 401);
   for (let index = 0; index < 5; index++) {
     const response = await fetch("http://127.0.0.1:4000/observe", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: telemetryHeaders,
       body: JSON.stringify({ source: "inventory-api", destination: "identity-api", status: 200, durationMs: 10 }),
     });
     assert.equal(response.status, 202);
@@ -247,7 +254,7 @@ try {
   for (let index = 0; index < 7; index++) {
     const response = await fetch("http://127.0.0.1:4000/observe", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: telemetryHeaders,
       body: JSON.stringify({ source: "inventory-api", destination: "identity-api", status: 503, durationMs: 1_000 }),
     });
     assert.equal(response.status, 202);

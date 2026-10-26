@@ -2,6 +2,7 @@ x-env: &env
   PORT: 8080
   DEMO_MODE: "true"
   ADMIN_TOKEN: local-nimbus
+  TELEMETRY_TOKEN: local-telemetry
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
 
 x-service: &service

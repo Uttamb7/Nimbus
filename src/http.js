@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 function report(url, status, started, correlationId) {
   const observation = { source: process.env.SERVICE_NAME, destination: new URL(url).hostname, protocol: "HTTP", status, durationMs: performance.now() - started, correlationId };
   console.log(JSON.stringify({ type: "dependency", ...observation }));
-  if (process.env.TELEMETRY_URL) fetch(process.env.TELEMETRY_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(observation) }).catch(() => {});
+  if (process.env.TELEMETRY_URL) fetch(process.env.TELEMETRY_URL, { method: "POST", headers: { "content-type": "application/json", ...(process.env.TELEMETRY_TOKEN ? { authorization: `Bearer ${process.env.TELEMETRY_TOKEN}` } : {}) }, body: JSON.stringify(observation) }).catch(() => {});
 }
 
 export async function request(url, options = {}, correlationId = randomUUID()) {

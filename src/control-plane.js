@@ -8,7 +8,7 @@ import { root, schema } from "./schema.js";
 import { Topology } from "./topology.js";
 import { Operations, pollOutbox } from "./operations.js";
 import { Actions } from "./actions.js";
-import { authenticate } from "./auth.js";
+import { authenticate, authenticateToken } from "./auth.js";
 import { inspectQuery, RateLimiter } from "./graphql-guard.js";
 import { History } from "./history.js";
 import { attachSubscriptions } from "./subscriptions.js";
@@ -34,6 +34,7 @@ async function route(request, response) {
   }
   if (url.pathname === "/health") return send(response, 200, { service: config.name, status: "healthy" });
   if (url.pathname === "/observe" && request.method === "POST") {
+    if (!authenticateToken(request.headers.authorization, config.telemetryToken)) return send(response, 401, { error: "telemetry authentication required" });
     const observation = await body(request);
     const edge = topology.observe(observation);
     const incident = await operations.observe(observation, {

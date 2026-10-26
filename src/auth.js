@@ -17,6 +17,11 @@ export function authenticate(header, configuredTokens = "") {
   return null;
 }
 
+export function authenticateToken(header, configuredToken) {
+  const supplied = /^Bearer (\S+)$/.exec(header || "")?.[1];
+  return Boolean(supplied && configuredToken && safeEqual(supplied, configuredToken));
+}
+
 export function requireRole(identity, minimum) {
   if (!identity || levels[identity.role] < levels[minimum]) throw new Error(`${minimum} role required`);
 }
