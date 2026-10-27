@@ -244,6 +244,17 @@ try {
   });
   assert.equal(forged.status, 401);
   for (let index = 0; index < 5; index++) {
+    const malformed = await fetch("http://127.0.0.1:4000/observe", {
+      method: "POST",
+      headers: telemetryHeaders,
+      body: JSON.stringify({ source: "forged", destination: "inventory-api", status: 503, durationMs: 1_000 }),
+    });
+    assert.equal(malformed.status, 400);
+  }
+  const protectedState = await graphql("{ serviceGraph { source } incidents { suspectedService } }");
+  assert.equal(protectedState.serviceGraph.some((edge) => edge.source === "forged"), false);
+  assert.equal(protectedState.incidents.some((incident) => incident.suspectedService === "forged"), false);
+  for (let index = 0; index < 5; index++) {
     const response = await fetch("http://127.0.0.1:4000/observe", {
       method: "POST",
       headers: telemetryHeaders,

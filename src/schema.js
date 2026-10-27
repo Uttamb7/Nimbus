@@ -21,7 +21,7 @@ export const schema = buildSchema(`
   type Subscription { serviceHealthChanged: Service, incidentChanged: Incident, auditEventAdded: AuditEvent }
 `);
 
-const names = ["gateway", "identity-api", "inventory-api", "order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"];
+export const serviceNames = ["gateway", "identity-api", "inventory-api", "order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"];
 
 const serviceValue = (name, metrics, operations) => ({ id: name, name, version: "0.1.0", owner: "Uttam Bhattarai", runtime: "Node.js 22", health: metrics.health, slo: operations.availabilityTarget * 100, metrics });
 const incidentValue = (value) => ({ ...value, affectedServices: value.affectedServices || [value.suspectedService], evidence: value.evidence || {}, baseline: value.baseline || null });
@@ -39,7 +39,7 @@ export function root(topology, operations, actions, identity = { role: "viewer",
   const service = (name) => serviceValue(name, operations.metrics(name), operations);
   const incident = (value) => incidentValue(value);
   return {
-    services: () => names.map(service),
+    services: () => serviceNames.map(service),
     serviceGraph: () => topology.edges(),
     shortestPath: ({ source, destination }) => topology.shortestPath(source, destination),
     incidents: async () => (await operations.incidents()).map(incident),
@@ -48,7 +48,7 @@ export function root(topology, operations, actions, identity = { role: "viewer",
       return found && incident(found);
     },
     systemHealth: () => {
-      const counts = names.map((name) => operations.metrics(name).health).reduce((result, health) => ({ ...result, [health.toLowerCase()]: result[health.toLowerCase()] + 1 }), { healthy: 0, degraded: 0, critical: 0, unknown: 0 });
+      const counts = serviceNames.map((name) => operations.metrics(name).health).reduce((result, health) => ({ ...result, [health.toLowerCase()]: result[health.toLowerCase()] + 1 }), { healthy: 0, degraded: 0, critical: 0, unknown: 0 });
       return { ...counts, status: counts.critical ? "CRITICAL" : counts.degraded ? "DEGRADED" : counts.healthy ? "HEALTHY" : "UNKNOWN" };
     },
     auditLog: () => actions?.auditLog() || [],

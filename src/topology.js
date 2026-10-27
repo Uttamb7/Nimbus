@@ -1,8 +1,8 @@
 export class Topology {
   #edges = new Map();
 
-  constructor({ maxAgeMs = 5 * 60_000, now = () => Date.now() } = {}) {
-    Object.assign(this, { maxAgeMs, now });
+  constructor({ maxAgeMs = 5 * 60_000, now = () => Date.now(), allowedServices } = {}) {
+    Object.assign(this, { maxAgeMs, now, allowedServices });
   }
 
   #prune() {
@@ -12,7 +12,14 @@ export class Topology {
   }
 
   observe({ source, destination, protocol = "HTTP", status, durationMs }) {
-    if (!source || !destination || !Number.isFinite(status) || !Number.isFinite(durationMs)) throw new Error("invalid observation");
+    const validStatus = status === 0 || (Number.isInteger(status) && status >= 100 && status <= 599);
+    if (
+      typeof source !== "string" || !source ||
+      typeof destination !== "string" || !destination ||
+      protocol !== "HTTP" || !validStatus ||
+      !Number.isFinite(durationMs) || durationMs < 0 ||
+      (this.allowedServices && (!this.allowedServices.has(source) || !this.allowedServices.has(destination)))
+    ) throw new Error("invalid observation");
     this.#prune();
     const key = `${source}->${destination}`;
     const edge = this.#edges.get(key) || { source, destination, protocol, requestCount: 0, errorCount: 0, totalLatencyMs: 0 };

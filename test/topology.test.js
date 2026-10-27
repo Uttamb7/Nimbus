@@ -36,3 +36,25 @@ test("topology expires stale edges from graphs, paths, and blast radius", () => 
     { requestCount: 1, errorCount: 0 },
   );
 });
+
+test("topology rejects malformed or unknown telemetry without changing state", () => {
+  const topology = new Topology({ allowedServices: new Set(["gateway", "inventory-api"]) });
+  const invalid = [
+    { source: "unknown", destination: "inventory-api", status: 200, durationMs: 1 },
+    { source: "gateway", destination: "unknown", status: 200, durationMs: 1 },
+    { source: "gateway", destination: "inventory-api", protocol: "AMQP", status: 200, durationMs: 1 },
+    { source: "gateway", destination: "inventory-api", status: 99, durationMs: 1 },
+    { source: "gateway", destination: "inventory-api", status: 600, durationMs: 1 },
+    { source: "gateway", destination: "inventory-api", status: 200.5, durationMs: 1 },
+    { source: "gateway", destination: "inventory-api", status: 200, durationMs: -1 },
+  ];
+
+  for (const observation of invalid) assert.throws(() => topology.observe(observation), /invalid observation/);
+  assert.deepEqual(topology.edges(), []);
+
+  topology.observe({ source: "gateway", destination: "inventory-api", status: 0, durationMs: 0 });
+  assert.deepEqual(
+    { requestCount: topology.edges()[0].requestCount, errorCount: topology.edges()[0].errorCount },
+    { requestCount: 1, errorCount: 1 },
+  );
+});

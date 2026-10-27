@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { graphql } from "graphql";
 import { config } from "./config.js";
 import { body, send } from "./http.js";
-import { root, schema } from "./schema.js";
+import { root, schema, serviceNames } from "./schema.js";
 import { Topology } from "./topology.js";
 import { Operations, pollOutbox } from "./operations.js";
 import { Actions } from "./actions.js";
@@ -15,7 +15,7 @@ import { attachSubscriptions } from "./subscriptions.js";
 import { Traces } from "./traces.js";
 import { pollQueues, Queues } from "./queues.js";
 
-export const topology = new Topology();
+export const topology = new Topology({ allowedServices: new Set(serviceNames) });
 export const history = new History({ connectionString: config.databaseUrl });
 export const operations = new Operations({ history });
 export const actions = new Actions(operations);
