@@ -30,8 +30,38 @@ export function send(response, status, body) {
   response.end(data);
 }
 
-export async function body(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  return chunks.length ? JSON.parse(Buffer.concat(chunks)) : {};
+export const maxJsonBodyBytes = 64 * 1024;
+
+const payloadTooLarge = () => Object.assign(
+  new Error(`request body exceeds ${maxJsonBodyBytes} bytes`),
+  { statusCode: 413 },
+);
+
+export function body(request) {
+  return new Promise((resolve, reject) => {
+    let chunks = [], size = 0, rejected = false;
+    const rejectLarge = () => {
+      rejected = true;
+      chunks = [];
+      reject(payloadTooLarge());
+    };
+    if (Number(request.headers["content-length"]) > maxJsonBodyBytes) rejectLarge();
+    request.on("data", (chunk) => {
+      if (rejected) return;
+      size += chunk.length;
+      if (size > maxJsonBodyBytes) return rejectLarge();
+      chunks.push(chunk);
+    });
+    request.on("end", () => {
+      if (rejected) return;
+      try {
+        resolve(chunks.length ? JSON.parse(Buffer.concat(chunks)) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on("error", (error) => {
+      if (!rejected) reject(error);
+    });
+  });
 }

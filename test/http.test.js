@@ -1,7 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { request } from "../src/http.js";
+import { Readable } from "node:stream";
+import { body, maxJsonBodyBytes, request } from "../src/http.js";
 import { Topology } from "../src/topology.js";
+
+const incoming = (chunks, headers = {}) => Object.assign(Readable.from(chunks), { headers });
+
+test("JSON bodies enforce their declared and streamed size", async () => {
+  const valid = JSON.stringify({ value: "x".repeat(maxJsonBodyBytes - 12) });
+  assert.deepEqual(await body(incoming([Buffer.from(valid)], { "content-length": Buffer.byteLength(valid) })), JSON.parse(valid));
+
+  await assert.rejects(
+    body(incoming([], { "content-length": maxJsonBodyBytes + 1 })),
+    (error) => error.statusCode === 413 && /exceeds/.test(error.message),
+  );
+  await assert.rejects(
+    body(incoming([Buffer.alloc(maxJsonBodyBytes), Buffer.alloc(1)])),
+    (error) => error.statusCode === 413 && /exceeds/.test(error.message),
+  );
+});
 
 test("network failures are observed as dependency errors", async (t) => {
   const observations = [];

@@ -56,7 +56,7 @@ async function route(request, response) {
 
 export async function start(port = config.port) {
   await history.migrate();
-  const server = createServer((request, response) => route(request, response).catch((error) => send(response, 400, { errors: [{ message: error.message }] })));
+  const server = createServer((request, response) => route(request, response).catch((error) => send(response, error.statusCode || 400, { errors: [{ message: error.message }] })));
   attachSubscriptions(server, { topology, operations, authTokens: config.authTokens, rateLimiter });
   const monitor = setInterval(() => {
     void pollQueues(queues, operations);
