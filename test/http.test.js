@@ -8,14 +8,22 @@ const incoming = (chunks, headers = {}) => Object.assign(Readable.from(chunks), 
 
 test("JSON bodies enforce their declared and streamed size", async () => {
   const valid = JSON.stringify({ value: "x".repeat(maxJsonBodyBytes - 12) });
-  assert.deepEqual(await body(incoming([Buffer.from(valid)], { "content-length": Buffer.byteLength(valid) })), JSON.parse(valid));
+  const jsonHeaders = { "content-type": "Application/JSON; charset=utf-8" };
+  assert.deepEqual(await body(incoming([Buffer.from(valid)], { ...jsonHeaders, "content-length": Buffer.byteLength(valid) }), { requireJson: true }), JSON.parse(valid));
+
+  for (const contentType of [undefined, "text/plain", "application/graphql"]) {
+    await assert.rejects(
+      body(incoming([Buffer.from("{}")], contentType ? { "content-type": contentType } : {}), { requireJson: true }),
+      (error) => error.statusCode === 415 && /application\/json/.test(error.message),
+    );
+  }
 
   await assert.rejects(
-    body(incoming([], { "content-length": maxJsonBodyBytes + 1 })),
+    body(incoming([], { ...jsonHeaders, "content-length": maxJsonBodyBytes + 1 }), { requireJson: true }),
     (error) => error.statusCode === 413 && /exceeds/.test(error.message),
   );
   await assert.rejects(
-    body(incoming([Buffer.alloc(maxJsonBodyBytes), Buffer.alloc(1)])),
+    body(incoming([Buffer.alloc(maxJsonBodyBytes), Buffer.alloc(1)], jsonHeaders), { requireJson: true }),
     (error) => error.statusCode === 413 && /exceeds/.test(error.message),
   );
 });

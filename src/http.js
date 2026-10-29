@@ -32,13 +32,23 @@ export function send(response, status, body) {
 
 export const maxJsonBodyBytes = 64 * 1024;
 
+const unsupportedMediaType = () => Object.assign(
+  new Error("content-type must be application/json"),
+  { statusCode: 415 },
+);
+
 const payloadTooLarge = () => Object.assign(
   new Error(`request body exceeds ${maxJsonBodyBytes} bytes`),
   { statusCode: 413 },
 );
 
-export function body(request) {
+export function body(request, { requireJson = false } = {}) {
   return new Promise((resolve, reject) => {
+    const contentType = request.headers["content-type"];
+    if (requireJson && (typeof contentType !== "string" || contentType.split(";", 1)[0].trim().toLowerCase() !== "application/json")) {
+      reject(unsupportedMediaType());
+      return;
+    }
     let chunks = [], size = 0, rejected = false;
     const rejectLarge = () => {
       rejected = true;

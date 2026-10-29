@@ -16,6 +16,25 @@ test("control plane rejects oversized JSON before changing operational state", a
     padding: "x".repeat(maxJsonBodyBytes),
   });
 
+  for (const contentType of [undefined, "text/plain"]) {
+    const headers = { authorization: "Bearer telemetry-test" };
+    if (contentType) headers["content-type"] = contentType;
+    const response = await fetch(`${baseUrl}/observe`, {
+      method: "POST", headers, body: "{}",
+    });
+    assert.equal(response.status, 415);
+  }
+  assert.deepEqual(topology.edges(), []);
+  assert.equal(operations.metrics("gateway").requestCount, 0);
+  assert.deepEqual(await operations.incidents(), []);
+
+  const wrongGraphqlType = await fetch(`${baseUrl}/graphql`, {
+    method: "POST",
+    headers: { authorization: "Bearer viewer-test", "content-type": "application/graphql" },
+    body: "{ services { name } }",
+  });
+  assert.equal(wrongGraphqlType.status, 415);
+
   const observationResponse = await fetch(`${baseUrl}/observe`, {
     method: "POST",
     headers: { authorization: "Bearer telemetry-test", "content-type": "application/json" },
@@ -35,7 +54,7 @@ test("control plane rejects oversized JSON before changing operational state", a
 
   const validResponse = await fetch(`${baseUrl}/observe`, {
     method: "POST",
-    headers: { authorization: "Bearer telemetry-test", "content-type": "application/json" },
+    headers: { authorization: "Bearer telemetry-test", "content-type": "Application/JSON; charset=utf-8" },
     body: JSON.stringify({ source: "gateway", destination: "identity-api", status: 200, durationMs: 1 }),
   });
   assert.equal(validResponse.status, 202);

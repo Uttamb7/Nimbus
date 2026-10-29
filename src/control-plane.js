@@ -35,7 +35,7 @@ async function route(request, response) {
   if (url.pathname === "/health") return send(response, 200, { service: config.name, status: "healthy" });
   if (url.pathname === "/observe" && request.method === "POST") {
     if (!authenticateToken(request.headers.authorization, config.telemetryToken)) return send(response, 401, { error: "telemetry authentication required" });
-    const observation = await body(request);
+    const observation = await body(request, { requireJson: true });
     const edge = topology.observe(observation);
     const incident = await operations.observe(observation, {
       affectedServices: [observation.source, ...topology.downstream(observation.source)],
@@ -46,7 +46,7 @@ async function route(request, response) {
     if (!rateLimiter.allow(request.socket.remoteAddress || "unknown")) return send(response, 429, { errors: [{ message: "rate limit exceeded" }] });
     const identity = authenticate(request.headers.authorization, config.authTokens);
     if (!identity) return send(response, 401, { errors: [{ message: "authentication required" }] });
-    const { query, variables } = await body(request);
+    const { query, variables } = await body(request, { requireJson: true });
     if (typeof query !== "string" || query.length > 10_000) return send(response, 400, { errors: [{ message: "invalid query" }] });
     inspectQuery(query);
     return send(response, 200, await graphql({ schema, source: query, rootValue: root(topology, operations, actions, identity, traces, undefined, queues), variableValues: variables }));
