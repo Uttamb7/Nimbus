@@ -17,7 +17,17 @@ test("health stays available during an injected fault", async () => {
   assert.deepEqual(await fault.json(), { error: "injected fault" });
   const restored = await fetch(`http://127.0.0.1:${port}/admin/fault`, { method: "DELETE", headers: { "x-nimbus-admin": "test" } });
   assert.equal(restored.status, 200);
-  const injected = await fetch(`http://127.0.0.1:${port}/admin/fault`, { method: "POST", headers: { "content-type": "application/json", "x-nimbus-admin": "test" }, body: JSON.stringify({ status: 502, latencyMs: 0, durationSeconds: 10 }) });
+  for (const contentType of [undefined, "text/plain"]) {
+    const headers = { "x-nimbus-admin": "test" };
+    if (contentType) headers["content-type"] = contentType;
+    const rejected = await fetch(`http://127.0.0.1:${port}/admin/fault`, {
+      method: "POST", headers,
+      body: JSON.stringify({ status: 502, latencyMs: 0, durationSeconds: 10 }),
+    });
+    assert.equal(rejected.status, 415);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/users/me`)).status, 200);
+  }
+  const injected = await fetch(`http://127.0.0.1:${port}/admin/fault`, { method: "POST", headers: { "content-type": "Application/JSON; charset=utf-8", "x-nimbus-admin": "test" }, body: JSON.stringify({ status: 502, latencyMs: 0, durationSeconds: 10 }) });
   assert.equal(injected.status, 202);
   assert.equal((await fetch(`http://127.0.0.1:${port}/users/me`)).status, 502);
   await new Promise((resolve) => server.close(resolve));

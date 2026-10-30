@@ -33,7 +33,7 @@ async function route(req, res, eventStore) {
       return send(res, 200, { restored: true });
     }
     if (req.method === "POST") {
-      const input = await body(req);
+      const input = await body(req, { requireJson: true });
       if (!Number.isInteger(input.status) || input.status < 500 || input.status > 599 || !Number.isInteger(input.latencyMs) || input.latencyMs < 0 || input.latencyMs > 5_000 || !Number.isInteger(input.durationSeconds) || input.durationSeconds < 1 || input.durationSeconds > 300) return send(res, 400, { error: "invalid fault" });
       fault = { status: input.status, latencyMs: input.latencyMs, expiresAt: Date.now() + input.durationSeconds * 1_000 };
       return send(res, 202, { injected: true, ...fault });
@@ -43,10 +43,13 @@ async function route(req, res, eventStore) {
   if (fault.latencyMs) await wait(fault.latencyMs);
   if (fault.status) return send(res, fault.status, { error: "injected fault" });
   if (config.name === "identity-api" && url.pathname === "/users/me") return send(res, 200, { id: "demo-user", active: true });
-  if (config.name === "inventory-api" && url.pathname === "/reserve" && req.method === "POST") return send(res, 200, { reservationId: randomUUID() });
+  if (config.name === "inventory-api" && url.pathname === "/reserve" && req.method === "POST") {
+    await body(req, { requireJson: true });
+    return send(res, 200, { reservationId: randomUUID() });
+  }
 
   if (config.name === "gateway" && url.pathname === "/checkout" && req.method === "POST") {
-    const input = await body(req);
+    const input = await body(req, { requireJson: true });
     const idempotencyKey = req.headers["idempotency-key"] || randomUUID();
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const [user, order] = await Promise.all([
@@ -57,7 +60,7 @@ async function route(req, res, eventStore) {
   }
 
   if (config.name === "order-orchestrator" && url.pathname === "/orders" && req.method === "POST") {
-    const input = await body(req);
+    const input = await body(req, { requireJson: true });
     const idempotencyKey = req.headers["idempotency-key"] || randomUUID();
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);
@@ -67,7 +70,7 @@ async function route(req, res, eventStore) {
   }
 
   if (url.pathname === "/events" && req.method === "POST") {
-    const event = await body(req);
+    const event = await body(req, { requireJson: true });
     const accepted = await processEvent(event, eventStore);
     return send(res, accepted ? 202 : 200, { [accepted ? "accepted" : "duplicate"]: true });
   }
@@ -93,7 +96,8 @@ export async function start(port = config.port, dependencies = {}) {
 
   const server = createServer((req, res) => route(req, res, eventStore).catch((error) => {
     console.error(JSON.stringify({ type: "error", service: config.name, message: error.message }));
-    if (!res.headersSent) send(res, 502, { error: "dependency failure", correlationId: req.headers["x-correlation-id"] });
+    const status = error.statusCode || 502;
+    if (!res.headersSent) send(res, status, { error: status === 502 ? "dependency failure" : error.message, correlationId: req.headers["x-correlation-id"] });
     else res.end();
   }));
   await new Promise((resolve) => server.listen(port, resolve));

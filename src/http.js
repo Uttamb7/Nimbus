@@ -46,6 +46,7 @@ export function body(request, { requireJson = false } = {}) {
   return new Promise((resolve, reject) => {
     const contentType = request.headers["content-type"];
     if (requireJson && (typeof contentType !== "string" || contentType.split(";", 1)[0].trim().toLowerCase() !== "application/json")) {
+      request.resume();
       reject(unsupportedMediaType());
       return;
     }
