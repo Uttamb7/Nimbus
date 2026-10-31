@@ -17,6 +17,38 @@ test("operator actions control faults and preserve audit history", async () => {
   await actions.resolveIncident({ id: incident.id }, "Uttamb7");
 
   assert.equal(requests.length, 4);
+  assert.ok(requests.every(({ options }) => options.signal instanceof AbortSignal));
   assert.equal((await operations.incidents())[0].status, "RESOLVED");
   assert.deepEqual((await actions.auditLog()).map((event) => event.action), ["incident.resolved", "incident.acknowledged", "traffic.generated", "failure.restored", "failure.injected"]);
+});
+
+test("operator action requests time out without false success audits", async () => {
+  const requests = [];
+  const operations = new Operations();
+  const request = (url, options) => {
+    requests.push({ url, options });
+    return new Promise((resolve, reject) => {
+      const pending = setTimeout(resolve, 1_000);
+      options.signal.addEventListener("abort", () => {
+        clearTimeout(pending);
+        reject(options.signal.reason);
+      }, { once: true });
+    });
+  };
+  const actions = new Actions(operations, { request, requestTimeoutMs: 5 });
+
+  await assert.rejects(
+    actions.injectFailure({ service: "gateway" }, "Uttamb7"),
+    { name: "TimeoutError" },
+  );
+  await assert.rejects(
+    actions.restoreService({ service: "gateway" }, "Uttamb7"),
+    { name: "TimeoutError" },
+  );
+  assert.deepEqual(await actions.auditLog(), []);
+
+  const traffic = await actions.generateTraffic({ count: 2 }, "Uttamb7");
+  assert.deepEqual(JSON.parse(traffic.metadata), { count: 2, succeeded: 0 });
+  assert.equal(requests.length, 4);
+  assert.ok(requests.every(({ options }) => options.signal instanceof AbortSignal));
 });
