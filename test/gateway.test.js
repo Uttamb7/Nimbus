@@ -5,8 +5,13 @@ import { createServer } from "node:http";
 test("checkout requires JSON before calling dependencies", async (t) => {
   t.mock.method(console, "log", () => {});
   const calls = [];
+  let rejectIdentity = false;
   const dependency = createServer((request, response) => {
     calls.push(request.url);
+    if (request.url === "/users/me" && rejectIdentity) {
+      response.writeHead(503, { "content-type": "application/json" });
+      return response.end('{"error":"unavailable"}');
+    }
     response.writeHead(200, { "content-type": "application/json" });
     response.end(request.url === "/users/me"
       ? '{"id":"demo-user"}'
@@ -30,13 +35,24 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   }
   assert.deepEqual(calls, []);
 
+  rejectIdentity = true;
+  const rejected = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sku: "demo", quantity: 1 }),
+  });
+  assert.equal(rejected.status, 502);
+  assert.deepEqual(calls, ["/users/me"]);
+
+  rejectIdentity = false;
+  calls.length = 0;
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "Application/JSON; charset=utf-8" },
     body: JSON.stringify({ sku: "demo", quantity: 1 }),
   });
   assert.equal(response.status, 202);
-  assert.deepEqual(calls.sort(), ["/orders", "/users/me"]);
+  assert.deepEqual(calls, ["/users/me", "/orders"]);
 
   await new Promise((resolve) => server.close(resolve));
   await new Promise((resolve) => dependency.close(resolve));

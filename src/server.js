@@ -52,10 +52,8 @@ async function route(req, res, eventStore) {
     const input = await body(req, { requireJson: true });
     const idempotencyKey = req.headers["idempotency-key"] || randomUUID();
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
-    const [user, order] = await Promise.all([
-      request(`${config.identityUrl}/users/me`, {}, correlationId),
-      request(`${config.orderUrl}/orders`, { method: "POST", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify(input) }, correlationId),
-    ]);
+    const user = await request(`${config.identityUrl}/users/me`, {}, correlationId);
+    const order = await request(`${config.orderUrl}/orders`, { method: "POST", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify(input) }, correlationId);
     return send(res, 202, { userId: user.id, ...order, correlationId });
   }
 
