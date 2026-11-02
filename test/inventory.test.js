@@ -15,10 +15,19 @@ test("inventory reservations require JSON", async () => {
     assert.equal(response.status, 415);
   }
 
+  for (const input of [null, { sku: " ", quantity: 1 }, { sku: "demo", quantity: 0 }]) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    assert.equal(response.status, 400);
+  }
+
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "Application/JSON; charset=utf-8" },
-    body: JSON.stringify({ sku: "demo", quantity: 1 }),
+    body: JSON.stringify({ sku: "x".repeat(64), quantity: 100 }),
   });
   assert.equal(response.status, 200);
   assert.ok((await response.json()).reservationId);

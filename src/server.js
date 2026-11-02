@@ -11,6 +11,18 @@ import { annotateTrace, currentTraceContext } from "./tracing.js";
 const seenEvents = new Set();
 let fault = { status: config.faultStatus, latencyMs: 0, expiresAt: Infinity };
 
+function validCheckout(input) {
+  return input !== null
+    && typeof input === "object"
+    && !Array.isArray(input)
+    && typeof input.sku === "string"
+    && input.sku.trim().length > 0
+    && input.sku.length <= 64
+    && Number.isInteger(input.quantity)
+    && input.quantity >= 1
+    && input.quantity <= 100;
+}
+
 async function processEvent(event, eventStore) {
   annotateTrace({ "nimbus.correlation_id": event.correlationId, "nimbus.idempotency_key": event.idempotencyKey });
   const firstDelivery = eventStore ? await eventStore.recordConsumerEvent(config.name, event.eventId) : !seenEvents.has(event.eventId);
@@ -44,12 +56,14 @@ async function route(req, res, eventStore) {
   if (fault.status) return send(res, fault.status, { error: "injected fault" });
   if (config.name === "identity-api" && url.pathname === "/users/me") return send(res, 200, { id: "demo-user", active: true });
   if (config.name === "inventory-api" && url.pathname === "/reserve" && req.method === "POST") {
-    await body(req, { requireJson: true });
+    const input = await body(req, { requireJson: true });
+    if (!validCheckout(input)) return send(res, 400, { error: "invalid checkout" });
     return send(res, 200, { reservationId: randomUUID() });
   }
 
   if (config.name === "gateway" && url.pathname === "/checkout" && req.method === "POST") {
     const input = await body(req, { requireJson: true });
+    if (!validCheckout(input)) return send(res, 400, { error: "invalid checkout" });
     const idempotencyKey = req.headers["idempotency-key"] || randomUUID();
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const user = await request(`${config.identityUrl}/users/me`, {}, correlationId);
@@ -59,6 +73,7 @@ async function route(req, res, eventStore) {
 
   if (config.name === "order-orchestrator" && url.pathname === "/orders" && req.method === "POST") {
     const input = await body(req, { requireJson: true });
+    if (!validCheckout(input)) return send(res, 400, { error: "invalid checkout" });
     const idempotencyKey = req.headers["idempotency-key"] || randomUUID();
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);

@@ -35,6 +35,16 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   }
   assert.deepEqual(calls, []);
 
+  for (const input of [null, [], {}, { sku: " ", quantity: 1 }, { sku: "x".repeat(65), quantity: 1 }, { sku: "demo", quantity: 0 }, { sku: "demo", quantity: 101 }, { sku: "demo", quantity: 1.5 }]) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    assert.equal(response.status, 400);
+  }
+  assert.deepEqual(calls, []);
+
   rejectIdentity = true;
   const rejected = await fetch(url, {
     method: "POST",
@@ -49,7 +59,7 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "Application/JSON; charset=utf-8" },
-    body: JSON.stringify({ sku: "demo", quantity: 1 }),
+    body: JSON.stringify({ sku: "x".repeat(64), quantity: 100 }),
   });
   assert.equal(response.status, 202);
   assert.deepEqual(calls, ["/users/me", "/orders"]);

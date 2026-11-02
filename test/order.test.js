@@ -32,10 +32,21 @@ test("order acceptance persists its outbox event before responding", async (t) =
   assert.equal(inventoryRequests, 0);
   assert.equal(persisted.length, 0);
 
+  for (const input of [[], { sku: "", quantity: 1 }, { sku: "demo", quantity: 101 }]) {
+    const rejected = await fetch(`http://127.0.0.1:${server.address().port}/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "checkout-1" },
+      body: JSON.stringify(input),
+    });
+    assert.equal(rejected.status, 400);
+  }
+  assert.equal(inventoryRequests, 0);
+  assert.equal(persisted.length, 0);
+
   const response = await fetch(`http://127.0.0.1:${server.address().port}/orders`, {
     method: "POST",
     headers: { "content-type": "Application/JSON; charset=utf-8", "idempotency-key": "checkout-1", "x-correlation-id": "correlation-1" },
-    body: JSON.stringify({ sku: "demo", quantity: 1 }),
+    body: JSON.stringify({ sku: "x".repeat(64), quantity: 100 }),
   });
 
   assert.equal(response.status, 202);
