@@ -32,6 +32,20 @@ test("order acceptance persists its outbox event before responding", async (t) =
   assert.equal(inventoryRequests, 0);
   assert.equal(persisted.length, 0);
 
+  for (const headers of [
+    { "x-correlation-id": "contains space", "idempotency-key": "checkout-1" },
+    { "x-correlation-id": "correlation-1", "idempotency-key": "x".repeat(129) },
+  ]) {
+    const rejected = await fetch(`http://127.0.0.1:${server.address().port}/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify({ sku: "demo", quantity: 1 }),
+    });
+    assert.equal(rejected.status, 400);
+  }
+  assert.equal(inventoryRequests, 0);
+  assert.equal(persisted.length, 0);
+
   for (const input of [[], { sku: "", quantity: 1 }, { sku: "demo", quantity: 101 }]) {
     const rejected = await fetch(`http://127.0.0.1:${server.address().port}/orders`, {
       method: "POST",
@@ -45,7 +59,7 @@ test("order acceptance persists its outbox event before responding", async (t) =
 
   const response = await fetch(`http://127.0.0.1:${server.address().port}/orders`, {
     method: "POST",
-    headers: { "content-type": "Application/JSON; charset=utf-8", "idempotency-key": "checkout-1", "x-correlation-id": "correlation-1" },
+    headers: { "content-type": "Application/JSON; charset=utf-8", "idempotency-key": "i".repeat(128), "x-correlation-id": "c".repeat(128) },
     body: JSON.stringify({ sku: "x".repeat(64), quantity: 100 }),
   });
 
@@ -53,10 +67,19 @@ test("order acceptance persists its outbox event before responding", async (t) =
   const order = await response.json();
   assert.equal(persisted.length, 1);
   assert.equal(persisted[0].orderId, order.orderId);
-  assert.equal(persisted[0].correlationId, "correlation-1");
-  assert.equal(persisted[0].idempotencyKey, "checkout-1");
+  assert.equal(persisted[0].correlationId, "c".repeat(128));
+  assert.equal(persisted[0].idempotencyKey, "i".repeat(128));
   assert.equal(persisted[0].type, "order.created");
   assert.equal(inventoryRequests, 1);
+
+  const generated = await fetch(`http://127.0.0.1:${server.address().port}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sku: "demo", quantity: 1 }),
+  });
+  assert.equal(generated.status, 202);
+  assert.match(persisted[1].correlationId, /^[0-9a-f-]{36}$/);
+  assert.match(persisted[1].idempotencyKey, /^[0-9a-f-]{36}$/);
   await new Promise((resolve) => server.close(resolve));
   await new Promise((resolve) => inventory.close(resolve));
 });

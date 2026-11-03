@@ -23,6 +23,14 @@ function validCheckout(input) {
     && input.quantity <= 100;
 }
 
+function requestIdentifier(value, name) {
+  if (value === undefined) return randomUUID();
+  if (typeof value !== "string" || !/^[\x21-\x7e]{1,128}$/.test(value)) {
+    throw Object.assign(new Error(`${name} must be 1-128 visible ASCII characters`), { statusCode: 400 });
+  }
+  return value;
+}
+
 async function processEvent(event, eventStore) {
   annotateTrace({ "nimbus.correlation_id": event.correlationId, "nimbus.idempotency_key": event.idempotencyKey });
   const firstDelivery = eventStore ? await eventStore.recordConsumerEvent(config.name, event.eventId) : !seenEvents.has(event.eventId);
@@ -34,7 +42,7 @@ async function processEvent(event, eventStore) {
 
 async function route(req, res, eventStore) {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const correlationId = req.headers["x-correlation-id"] || randomUUID();
+  const correlationId = requestIdentifier(req.headers["x-correlation-id"], "x-correlation-id");
   annotateTrace({ "nimbus.correlation_id": correlationId });
   res.setHeader("x-correlation-id", correlationId);
 
@@ -64,7 +72,7 @@ async function route(req, res, eventStore) {
   if (config.name === "gateway" && url.pathname === "/checkout" && req.method === "POST") {
     const input = await body(req, { requireJson: true });
     if (!validCheckout(input)) return send(res, 400, { error: "invalid checkout" });
-    const idempotencyKey = req.headers["idempotency-key"] || randomUUID();
+    const idempotencyKey = requestIdentifier(req.headers["idempotency-key"], "idempotency-key");
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const user = await request(`${config.identityUrl}/users/me`, {}, correlationId);
     const order = await request(`${config.orderUrl}/orders`, { method: "POST", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify(input) }, correlationId);
@@ -74,7 +82,7 @@ async function route(req, res, eventStore) {
   if (config.name === "order-orchestrator" && url.pathname === "/orders" && req.method === "POST") {
     const input = await body(req, { requireJson: true });
     if (!validCheckout(input)) return send(res, 400, { error: "invalid checkout" });
-    const idempotencyKey = req.headers["idempotency-key"] || randomUUID();
+    const idempotencyKey = requestIdentifier(req.headers["idempotency-key"], "idempotency-key");
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);
     const event = orderCreated({ correlationId, idempotencyKey, orderId: randomUUID(), reservationId: reservation.reservationId, traceContext: currentTraceContext() });
@@ -110,7 +118,7 @@ export async function start(port = config.port, dependencies = {}) {
   const server = createServer((req, res) => route(req, res, eventStore).catch((error) => {
     console.error(JSON.stringify({ type: "error", service: config.name, message: error.message }));
     const status = error.statusCode || 502;
-    if (!res.headersSent) send(res, status, { error: status === 502 ? "dependency failure" : error.message, correlationId: req.headers["x-correlation-id"] });
+    if (!res.headersSent) send(res, status, { error: status === 502 ? "dependency failure" : error.message, correlationId: res.getHeader("x-correlation-id") });
     else res.end();
   }));
   await new Promise((resolve) => server.listen(port, resolve));
