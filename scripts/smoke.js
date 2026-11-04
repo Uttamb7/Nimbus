@@ -99,6 +99,16 @@ const order = await checkout.json();
 assert.ok(order.orderId);
 assert.ok(order.correlationId);
 
+const retry = await fetch("http://127.0.0.1:8080/checkout", {
+  method: "POST",
+  headers: { "content-type": "application/json", "idempotency-key": "ci-checkout" },
+  body: JSON.stringify({ sku: "ci-demo", quantity: 1 }),
+});
+assert.equal(retry.status, 202);
+assert.equal((await retry.json()).orderId, order.orderId);
+assert.equal(Number(sql("SELECT count(*) FROM orders WHERE idempotency_key = 'ci-checkout'")), 1);
+assert.equal(Number(sql(`SELECT count(*) FROM outbox_events WHERE aggregate_id = '${order.orderId}'`)), 1);
+
 await waitFor(
   () => sql(`SELECT status || '|' || attempt_count FROM outbox_events WHERE aggregate_id = '${order.orderId}'`),
   (value) => value.startsWith("PENDING|") && Number(value.split("|")[1]) > 0,

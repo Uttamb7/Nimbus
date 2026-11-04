@@ -84,10 +84,14 @@ async function route(req, res, eventStore) {
     if (!validCheckout(input)) return send(res, 400, { error: "invalid checkout" });
     const idempotencyKey = requestIdentifier(req.headers["idempotency-key"], "idempotency-key");
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
-    const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);
-    const event = orderCreated({ correlationId, idempotencyKey, orderId: randomUUID(), reservationId: reservation.reservationId, traceContext: currentTraceContext() });
-    if (eventStore) await eventStore.createOrder(event);
-    return send(res, 202, { orderId: event.orderId, status: "accepted" });
+    const createEvent = async () => {
+      const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);
+      return orderCreated({ correlationId, idempotencyKey, orderId: randomUUID(), reservationId: reservation.reservationId, traceContext: currentTraceContext() });
+    };
+    const order = eventStore
+      ? await eventStore.createOrder(idempotencyKey, createEvent)
+      : { orderId: (await createEvent()).orderId };
+    return send(res, 202, { orderId: order.orderId, status: "accepted" });
   }
 
   if (url.pathname === "/events" && req.method === "POST") {

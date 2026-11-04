@@ -12,10 +12,20 @@ export class EventStore {
     return migrate(this.pool, directory);
   }
 
-  async createOrder(event) {
+  async createOrder(idempotencyKey, createEvent) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [idempotencyKey]);
+      const existing = await client.query(
+        "SELECT id FROM orders WHERE idempotency_key = $1 ORDER BY created_at, id LIMIT 1",
+        [idempotencyKey],
+      );
+      if (existing.rows[0]) {
+        await client.query("COMMIT");
+        return { orderId: existing.rows[0].id, created: false };
+      }
+      const event = await createEvent();
       await client.query(
         "INSERT INTO orders (id, reservation_id, idempotency_key, created_at) VALUES ($1, $2, $3, $4)",
         [event.orderId, event.reservationId, event.idempotencyKey, event.createdAt],
@@ -26,6 +36,7 @@ export class EventStore {
         [event.eventId, event.orderId, JSON.stringify(event), event.createdAt],
       );
       await client.query("COMMIT");
+      return { orderId: event.orderId, created: true };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

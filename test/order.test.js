@@ -5,8 +5,14 @@ import { createServer } from "node:http";
 test("order acceptance persists its outbox event before responding", async (t) => {
   t.mock.method(console, "log", () => {});
   let inventoryRequests = 0;
+  let failNextReservation = false;
   const inventory = createServer((request, response) => {
     inventoryRequests++;
+    if (failNextReservation) {
+      failNextReservation = false;
+      response.writeHead(503, { "content-type": "application/json" });
+      return response.end('{"error":"unavailable"}');
+    }
     response.writeHead(200, { "content-type": "application/json" });
     response.end('{"reservationId":"713615df-5085-4aec-8f45-79580c66b63d"}');
   });
@@ -16,7 +22,19 @@ test("order acceptance persists its outbox event before responding", async (t) =
   delete process.env.DATABASE_URL;
   delete process.env.TELEMETRY_URL;
   const persisted = [];
-  const eventStore = { createOrder: async (event) => persisted.push(event) };
+  const completed = new Map(), inFlight = new Map();
+  const eventStore = { createOrder(idempotencyKey, createEvent) {
+    if (completed.has(idempotencyKey)) return { orderId: completed.get(idempotencyKey), created: false };
+    if (inFlight.has(idempotencyKey)) return inFlight.get(idempotencyKey);
+    const creation = (async () => {
+      const event = await createEvent();
+      persisted.push(event);
+      completed.set(idempotencyKey, event.orderId);
+      return { orderId: event.orderId, created: true };
+    })().finally(() => inFlight.delete(idempotencyKey));
+    inFlight.set(idempotencyKey, creation);
+    return creation;
+  } };
   const publisher = { start() {}, async stop() {} };
   const { start } = await import("../src/server.js");
   const server = await start(0, { eventStore, publisher });
@@ -80,6 +98,35 @@ test("order acceptance persists its outbox event before responding", async (t) =
   assert.equal(generated.status, 202);
   assert.match(persisted[1].correlationId, /^[0-9a-f-]{36}$/);
   assert.match(persisted[1].idempotencyKey, /^[0-9a-f-]{36}$/);
+
+  const postOrder = (idempotencyKey) => fetch(`http://127.0.0.1:${server.address().port}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
+    body: JSON.stringify({ sku: "demo", quantity: 1 }),
+  });
+  const inventoryBeforeReplay = inventoryRequests;
+  const replay = await postOrder("i".repeat(128));
+  assert.equal(replay.status, 202);
+  assert.equal((await replay.json()).orderId, order.orderId);
+  assert.equal(inventoryRequests, inventoryBeforeReplay);
+  assert.equal(persisted.length, 2);
+
+  const [concurrentA, concurrentB] = await Promise.all([
+    postOrder("concurrent-order"), postOrder("concurrent-order"),
+  ]);
+  assert.equal(concurrentA.status, 202);
+  assert.equal(concurrentB.status, 202);
+  assert.equal((await concurrentA.json()).orderId, (await concurrentB.json()).orderId);
+  assert.equal(inventoryRequests, inventoryBeforeReplay + 1);
+  assert.equal(persisted.length, 3);
+
+  failNextReservation = true;
+  assert.equal((await postOrder("retry-after-failure")).status, 502);
+  const retried = await postOrder("retry-after-failure");
+  assert.equal(retried.status, 202);
+  assert.ok((await retried.json()).orderId);
+  assert.equal(inventoryRequests, inventoryBeforeReplay + 3);
+  assert.equal(persisted.length, 4);
   await new Promise((resolve) => server.close(resolve));
   await new Promise((resolve) => inventory.close(resolve));
 });
