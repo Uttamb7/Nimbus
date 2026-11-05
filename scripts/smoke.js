@@ -108,6 +108,26 @@ assert.equal(retry.status, 202);
 assert.equal((await retry.json()).orderId, order.orderId);
 assert.equal(Number(sql("SELECT count(*) FROM orders WHERE idempotency_key = 'ci-checkout'")), 1);
 assert.equal(Number(sql(`SELECT count(*) FROM outbox_events WHERE aggregate_id = '${order.orderId}'`)), 1);
+assert.equal(Number(sql("SELECT count(*) FROM inventory_reservations WHERE idempotency_key = 'ci-checkout'")), 1);
+const reservationId = sql("SELECT id FROM inventory_reservations WHERE idempotency_key = 'ci-checkout'");
+compose(["restart", "inventory-api"], { stdio: "inherit" });
+const replayedReservation = await waitFor(
+  () => brokerNode(`
+    fetch("http://inventory-api:8080/reserve", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "ci-checkout" },
+      body: JSON.stringify({ sku: "ci-demo", quantity: 1 }),
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(String(response.status));
+      console.log(JSON.stringify(await response.json()));
+    }).catch((error) => { console.error(error); process.exit(1); });
+  `),
+  (value) => value.includes("reservationId"),
+  "inventory reservation was not replayed after restart",
+  40,
+);
+assert.equal(JSON.parse(replayedReservation).reservationId, reservationId);
+assert.equal(Number(sql("SELECT count(*) FROM inventory_reservations WHERE idempotency_key = 'ci-checkout'")), 1);
 
 await waitFor(
   () => sql(`SELECT status || '|' || attempt_count FROM outbox_events WHERE aggregate_id = '${order.orderId}'`),

@@ -66,7 +66,15 @@ async function route(req, res, eventStore) {
   if (config.name === "inventory-api" && url.pathname === "/reserve" && req.method === "POST") {
     const input = await body(req, { requireJson: true });
     if (!validCheckout(input)) return send(res, 400, { error: "invalid checkout" });
-    return send(res, 200, { reservationId: randomUUID() });
+    if (req.headers["idempotency-key"] === undefined) {
+      return send(res, 400, { error: "idempotency-key is required" });
+    }
+    const idempotencyKey = requestIdentifier(req.headers["idempotency-key"], "idempotency-key");
+    annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
+    const reservation = eventStore
+      ? await eventStore.reserveInventory(idempotencyKey, input, randomUUID)
+      : { reservationId: randomUUID() };
+    return send(res, 200, { reservationId: reservation.reservationId });
   }
 
   if (config.name === "gateway" && url.pathname === "/checkout" && req.method === "POST") {
@@ -85,7 +93,7 @@ async function route(req, res, eventStore) {
     const idempotencyKey = requestIdentifier(req.headers["idempotency-key"], "idempotency-key");
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const createEvent = async () => {
-      const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", body: JSON.stringify(input) }, correlationId);
+      const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify(input) }, correlationId);
       return orderCreated({ correlationId, idempotencyKey, orderId: randomUUID(), reservationId: reservation.reservationId, traceContext: currentTraceContext() });
     };
     const order = eventStore

@@ -66,6 +66,44 @@ test("failed outbox write rolls back the order transaction", async () => {
   assert.equal(queries.at(-1), "RELEASE");
 });
 
+test("inventory reservations replay identical requests and reject conflicts", async () => {
+  const rows = [];
+  const queries = [];
+  const client = {
+    query: async (text, values) => {
+      queries.push({ text, values });
+      if (text.includes("SELECT id, sku, quantity")) return { rows };
+      return { rows: [] };
+    },
+    release: () => queries.push({ text: "RELEASE" }),
+  };
+  const store = new EventStore({ pool: { connect: async () => client } });
+
+  const created = await store.reserveInventory(
+    "checkout-1", { sku: "demo", quantity: 2 },
+    () => "713615df-5085-4aec-8f45-79580c66b63d",
+  );
+  assert.deepEqual(created, {
+    reservationId: "713615df-5085-4aec-8f45-79580c66b63d", created: true,
+  });
+  assert.match(queries[1].text, /pg_advisory_xact_lock/);
+  assert.deepEqual(queries[3].values, [
+    created.reservationId, "checkout-1", "demo", 2,
+  ]);
+
+  rows.push({ id: created.reservationId, sku: "demo", quantity: 2 });
+  assert.deepEqual(
+    await store.reserveInventory("checkout-1", { sku: "demo", quantity: 2 }, assert.fail),
+    { reservationId: created.reservationId, created: false },
+  );
+  await assert.rejects(
+    store.reserveInventory("checkout-1", { sku: "other", quantity: 2 }, assert.fail),
+    (error) => error.statusCode === 409,
+  );
+  assert.equal(queries.at(-2).text, "ROLLBACK");
+  assert.equal(queries.at(-1).text, "RELEASE");
+});
+
 test("outbox claim returns the persisted attempt count", async () => {
   let query;
   const pool = { query: async (text) => {

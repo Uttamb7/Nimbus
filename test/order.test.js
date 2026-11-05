@@ -5,9 +5,11 @@ import { createServer } from "node:http";
 test("order acceptance persists its outbox event before responding", async (t) => {
   t.mock.method(console, "log", () => {});
   let inventoryRequests = 0;
+  const inventoryKeys = [];
   let failNextReservation = false;
   const inventory = createServer((request, response) => {
     inventoryRequests++;
+    inventoryKeys.push(request.headers["idempotency-key"]);
     if (failNextReservation) {
       failNextReservation = false;
       response.writeHead(503, { "content-type": "application/json" });
@@ -127,6 +129,9 @@ test("order acceptance persists its outbox event before responding", async (t) =
   assert.ok((await retried.json()).orderId);
   assert.equal(inventoryRequests, inventoryBeforeReplay + 3);
   assert.equal(persisted.length, 4);
+  assert.ok(inventoryKeys.every((key) => typeof key === "string" && key.length > 0));
+  assert.ok(inventoryKeys.includes("concurrent-order"));
+  assert.equal(inventoryKeys.filter((key) => key === "retry-after-failure").length, 2);
   await new Promise((resolve) => server.close(resolve));
   await new Promise((resolve) => inventory.close(resolve));
 });

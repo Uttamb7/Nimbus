@@ -45,6 +45,38 @@ export class EventStore {
     }
   }
 
+  async reserveInventory(idempotencyKey, { sku, quantity }, createId) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [idempotencyKey]);
+      const existing = await client.query(
+        "SELECT id, sku, quantity FROM inventory_reservations WHERE idempotency_key = $1",
+        [idempotencyKey],
+      );
+      if (existing.rows[0]) {
+        const reservation = existing.rows[0];
+        if (reservation.sku !== sku || reservation.quantity !== quantity) {
+          throw Object.assign(new Error("idempotency key was already used for another reservation"), { statusCode: 409 });
+        }
+        await client.query("COMMIT");
+        return { reservationId: reservation.id, created: false };
+      }
+      const reservationId = createId();
+      await client.query(
+        "INSERT INTO inventory_reservations (id, idempotency_key, sku, quantity) VALUES ($1, $2, $3, $4)",
+        [reservationId, idempotencyKey, sku, quantity],
+      );
+      await client.query("COMMIT");
+      return { reservationId, created: true };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async claim() {
     const result = await this.pool.query(
       `WITH candidate AS (

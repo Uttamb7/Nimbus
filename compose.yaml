@@ -80,7 +80,9 @@ services:
     environment: { <<: *env, SERVICE_NAME: identity-api, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${IDENTITY_FAULT_STATUS:-}" }
   inventory-api:
     <<: *service
-    environment: { <<: *env, SERVICE_NAME: inventory-api, TELEMETRY_URL: http://control-plane:4000/observe, FAULT_STATUS: "${INVENTORY_FAULT_STATUS:-}" }
+    environment: { <<: *env, SERVICE_NAME: inventory-api, TELEMETRY_URL: http://control-plane:4000/observe, DATABASE_URL: "postgresql://nimbus:nimbus-local@postgres:5432/nimbus", FAULT_STATUS: "${INVENTORY_FAULT_STATUS:-}" }
+    depends_on:
+      postgres: { condition: service_healthy }
   order-orchestrator:
     <<: *service
     environment:
