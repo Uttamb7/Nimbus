@@ -24,7 +24,7 @@ test("order and outbox event commit in one transaction", async () => {
 
   assert.deepEqual(result, { orderId: event.orderId, created: true });
   assert.deepEqual(queries.map(({ text }) => text.trim().split(" ")[0]), ["BEGIN", "SELECT", "SELECT", "INSERT", "INSERT", "COMMIT", "RELEASE"]);
-  assert.match(queries[1].text, /pg_advisory_xact_lock/);
+  assert.match(queries[1].text, /hashtextextended\(\$1, 0\)/);
   assert.deepEqual(queries[1].values, [event.idempotencyKey]);
   assert.deepEqual(queries[3].values, [event.orderId, event.reservationId, event.idempotencyKey, event.createdAt]);
   assert.deepEqual(queries[4].values, [event.eventId, event.orderId, JSON.stringify(event), event.createdAt]);
@@ -86,7 +86,7 @@ test("inventory reservations replay identical requests and reject conflicts", as
   assert.deepEqual(created, {
     reservationId: "713615df-5085-4aec-8f45-79580c66b63d", created: true,
   });
-  assert.match(queries[1].text, /pg_advisory_xact_lock/);
+  assert.match(queries[1].text, /hashtextextended\(\$1, 1\)/);
   assert.deepEqual(queries[3].values, [
     created.reservationId, "checkout-1", "demo", 2,
   ]);

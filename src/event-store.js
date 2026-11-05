@@ -49,7 +49,7 @@ export class EventStore {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [idempotencyKey]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 1))", [idempotencyKey]);
       const existing = await client.query(
         "SELECT id, sku, quantity FROM inventory_reservations WHERE idempotency_key = $1",
         [idempotencyKey],
