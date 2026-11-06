@@ -12,23 +12,29 @@ export class EventStore {
     return migrate(this.pool, directory);
   }
 
-  async createOrder(idempotencyKey, createEvent) {
+  async createOrder(idempotencyKey, { sku, quantity }, createEvent) {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [idempotencyKey]);
       const existing = await client.query(
-        "SELECT id FROM orders WHERE idempotency_key = $1 ORDER BY created_at, id LIMIT 1",
+        "SELECT id, sku, quantity FROM orders WHERE idempotency_key = $1 ORDER BY created_at, id LIMIT 1",
         [idempotencyKey],
       );
       if (existing.rows[0]) {
+        if (
+          (existing.rows[0].sku !== null && existing.rows[0].sku !== sku)
+          || (existing.rows[0].quantity !== null && existing.rows[0].quantity !== quantity)
+        ) {
+          throw Object.assign(new Error("idempotency key was already used for another order"), { statusCode: 409 });
+        }
         await client.query("COMMIT");
         return { orderId: existing.rows[0].id, created: false };
       }
       const event = await createEvent();
       await client.query(
-        "INSERT INTO orders (id, reservation_id, idempotency_key, created_at) VALUES ($1, $2, $3, $4)",
-        [event.orderId, event.reservationId, event.idempotencyKey, event.createdAt],
+        "INSERT INTO orders (id, reservation_id, idempotency_key, sku, quantity, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        [event.orderId, event.reservationId, event.idempotencyKey, sku, quantity, event.createdAt],
       );
       await client.query(
         `INSERT INTO outbox_events (id, aggregate_id, event, created_at)

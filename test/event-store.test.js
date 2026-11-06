@@ -20,13 +20,15 @@ test("order and outbox event commit in one transaction", async () => {
     createdAt: "2026-08-20T12:00:00.000Z",
   };
 
-  const result = await store.createOrder(event.idempotencyKey, async () => event);
+  const result = await store.createOrder(
+    event.idempotencyKey, { sku: "demo", quantity: 2 }, async () => event,
+  );
 
   assert.deepEqual(result, { orderId: event.orderId, created: true });
   assert.deepEqual(queries.map(({ text }) => text.trim().split(" ")[0]), ["BEGIN", "SELECT", "SELECT", "INSERT", "INSERT", "COMMIT", "RELEASE"]);
   assert.match(queries[1].text, /hashtextextended\(\$1, 0\)/);
   assert.deepEqual(queries[1].values, [event.idempotencyKey]);
-  assert.deepEqual(queries[3].values, [event.orderId, event.reservationId, event.idempotencyKey, event.createdAt]);
+  assert.deepEqual(queries[3].values, [event.orderId, event.reservationId, event.idempotencyKey, "demo", 2, event.createdAt]);
   assert.deepEqual(queries[4].values, [event.eventId, event.orderId, JSON.stringify(event), event.createdAt]);
 });
 
@@ -35,18 +37,45 @@ test("completed idempotency key replays without creating another event", async (
   const client = {
     query: async (text, values) => {
       queries.push({ text, values });
-      return text.includes("SELECT id FROM orders")
-        ? { rows: [{ id: "af0fb946-d2d2-4a49-a9d4-c2e2096ba695" }] }
+      return text.includes("SELECT id, sku, quantity FROM orders")
+        ? { rows: [{ id: "af0fb946-d2d2-4a49-a9d4-c2e2096ba695", sku: "demo", quantity: 2 }] }
         : { rows: [] };
     },
     release: () => queries.push({ text: "RELEASE" }),
   };
   const store = new EventStore({ pool: { connect: async () => client } });
 
-  const result = await store.createOrder("checkout-1", async () => assert.fail("created duplicate"));
+  const result = await store.createOrder(
+    "checkout-1", { sku: "demo", quantity: 2 }, async () => assert.fail("created duplicate"),
+  );
 
   assert.deepEqual(result, { orderId: "af0fb946-d2d2-4a49-a9d4-c2e2096ba695", created: false });
   assert.deepEqual(queries.map(({ text }) => text.trim().split(" ")[0]), ["BEGIN", "SELECT", "SELECT", "COMMIT", "RELEASE"]);
+});
+
+test("completed idempotency key rejects a different checkout", async () => {
+  const queries = [];
+  const client = {
+    query: async (text, values) => {
+      queries.push({ text, values });
+      return text.includes("SELECT id, sku, quantity FROM orders")
+        ? { rows: [{ id: "af0fb946-d2d2-4a49-a9d4-c2e2096ba695", sku: "demo", quantity: 2 }] }
+        : { rows: [] };
+    },
+    release: () => queries.push({ text: "RELEASE" }),
+  };
+  const store = new EventStore({ pool: { connect: async () => client } });
+
+  await assert.rejects(
+    store.createOrder(
+      "checkout-1", { sku: "other", quantity: 2 }, async () => assert.fail("created conflict"),
+    ),
+    (error) => error.statusCode === 409,
+  );
+  assert.deepEqual(
+    queries.map(({ text }) => text.trim().split(" ")[0]),
+    ["BEGIN", "SELECT", "SELECT", "ROLLBACK", "RELEASE"],
+  );
 });
 
 test("failed outbox write rolls back the order transaction", async () => {
@@ -61,7 +90,7 @@ test("failed outbox write rolls back the order transaction", async () => {
   };
   const store = new EventStore({ pool: { connect: async () => client } });
 
-  await assert.rejects(store.createOrder("key", async () => ({ orderId: "order", reservationId: "reservation", idempotencyKey: "key", eventId: "event", createdAt: "now" })), /outbox unavailable/);
+  await assert.rejects(store.createOrder("key", { sku: "demo", quantity: 1 }, async () => ({ orderId: "order", reservationId: "reservation", idempotencyKey: "key", eventId: "event", createdAt: "now" })), /outbox unavailable/);
   assert.equal(queries.at(-2), "ROLLBACK");
   assert.equal(queries.at(-1), "RELEASE");
 });

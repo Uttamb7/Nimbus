@@ -135,6 +135,20 @@ await waitFor(
   "outbox did not retain the event during broker outage",
 );
 compose(["restart", "order-orchestrator"], { stdio: "inherit" });
+const conflictingReplay = await waitFor(
+  () => fetch("http://127.0.0.1:8080/checkout", {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": "ci-checkout" },
+    body: JSON.stringify({ sku: "different", quantity: 1 }),
+  }),
+  (response) => response.status === 409,
+  "conflicting order replay was not rejected after restart",
+  40,
+);
+assert.equal(conflictingReplay.status, 409);
+assert.equal(Number(sql("SELECT count(*) FROM orders WHERE idempotency_key = 'ci-checkout'")), 1);
+assert.equal(Number(sql(`SELECT count(*) FROM outbox_events WHERE aggregate_id = '${order.orderId}'`)), 1);
+assert.equal(Number(sql("SELECT count(*) FROM inventory_reservations WHERE idempotency_key = 'ci-checkout'")), 1);
 compose(["start", "rabbitmq"], { stdio: "inherit" });
 await waitForBroker();
 const outbox = await waitFor(

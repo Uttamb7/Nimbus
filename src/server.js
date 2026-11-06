@@ -97,7 +97,7 @@ async function route(req, res, eventStore) {
       return orderCreated({ correlationId, idempotencyKey, orderId: randomUUID(), reservationId: reservation.reservationId, traceContext: currentTraceContext() });
     };
     const order = eventStore
-      ? await eventStore.createOrder(idempotencyKey, createEvent)
+      ? await eventStore.createOrder(idempotencyKey, input, createEvent)
       : { orderId: (await createEvent()).orderId };
     return send(res, 202, { orderId: order.orderId, status: "accepted" });
   }

@@ -25,13 +25,19 @@ test("order acceptance persists its outbox event before responding", async (t) =
   delete process.env.TELEMETRY_URL;
   const persisted = [];
   const completed = new Map(), inFlight = new Map();
-  const eventStore = { createOrder(idempotencyKey, createEvent) {
-    if (completed.has(idempotencyKey)) return { orderId: completed.get(idempotencyKey), created: false };
+  const eventStore = { createOrder(idempotencyKey, input, createEvent) {
+    if (completed.has(idempotencyKey)) {
+      const order = completed.get(idempotencyKey);
+      if (order.sku !== input.sku || order.quantity !== input.quantity) {
+        throw Object.assign(new Error("idempotency key was already used for another order"), { statusCode: 409 });
+      }
+      return { orderId: order.id, created: false };
+    }
     if (inFlight.has(idempotencyKey)) return inFlight.get(idempotencyKey);
     const creation = (async () => {
       const event = await createEvent();
       persisted.push(event);
-      completed.set(idempotencyKey, event.orderId);
+      completed.set(idempotencyKey, { id: event.orderId, ...input });
       return { orderId: event.orderId, created: true };
     })().finally(() => inFlight.delete(idempotencyKey));
     inFlight.set(idempotencyKey, creation);
@@ -101,15 +107,24 @@ test("order acceptance persists its outbox event before responding", async (t) =
   assert.match(persisted[1].correlationId, /^[0-9a-f-]{36}$/);
   assert.match(persisted[1].idempotencyKey, /^[0-9a-f-]{36}$/);
 
-  const postOrder = (idempotencyKey) => fetch(`http://127.0.0.1:${server.address().port}/orders`, {
+  const postOrder = (idempotencyKey, input = { sku: "demo", quantity: 1 }) => fetch(`http://127.0.0.1:${server.address().port}/orders`, {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
-    body: JSON.stringify({ sku: "demo", quantity: 1 }),
+    body: JSON.stringify(input),
   });
   const inventoryBeforeReplay = inventoryRequests;
-  const replay = await postOrder("i".repeat(128));
+  const replay = await postOrder("i".repeat(128), { sku: "x".repeat(64), quantity: 100 });
   assert.equal(replay.status, 202);
   assert.equal((await replay.json()).orderId, order.orderId);
+  assert.equal(inventoryRequests, inventoryBeforeReplay);
+  assert.equal(persisted.length, 2);
+
+  const conflict = await fetch(`http://127.0.0.1:${server.address().port}/orders`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": "i".repeat(128) },
+    body: JSON.stringify({ sku: "different", quantity: 100 }),
+  });
+  assert.equal(conflict.status, 409);
   assert.equal(inventoryRequests, inventoryBeforeReplay);
   assert.equal(persisted.length, 2);
 
