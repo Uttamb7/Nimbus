@@ -7,12 +7,17 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   const calls = [];
   const identifiers = [];
   let rejectIdentity = false;
+  let rejectOrder = false;
   const dependency = createServer((request, response) => {
     calls.push(request.url);
     identifiers.push({ correlationId: request.headers["x-correlation-id"], idempotencyKey: request.headers["idempotency-key"] });
     if (request.url === "/users/me" && rejectIdentity) {
       response.writeHead(503, { "content-type": "application/json" });
       return response.end('{"error":"unavailable"}');
+    }
+    if (request.url === "/orders" && rejectOrder) {
+      response.writeHead(409, { "content-type": "application/json" });
+      return response.end('{"error":"conflicting idempotency key"}');
     }
     response.writeHead(200, { "content-type": "application/json" });
     response.end(request.url === "/users/me"
@@ -90,6 +95,15 @@ test("checkout requires JSON before calling dependencies", async (t) => {
     { correlationId: "c".repeat(128), idempotencyKey: undefined },
     { correlationId: "c".repeat(128), idempotencyKey: "i".repeat(128) },
   ]);
+
+  rejectOrder = true;
+  const conflict = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": "i".repeat(128) },
+    body: JSON.stringify({ sku: "different", quantity: 100 }),
+  });
+  assert.equal(conflict.status, 409);
+  rejectOrder = false;
 
   calls.length = 0;
   identifiers.length = 0;

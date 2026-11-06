@@ -20,7 +20,12 @@ export async function request(url, options = {}, correlationId = randomUUID()) {
     throw error;
   }
   report(url, response.status, started, correlationId);
-  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+  if (!response.ok) {
+    throw Object.assign(
+      new Error(`${url} returned ${response.status}`),
+      response.status === 409 ? { statusCode: 409 } : {},
+    );
+  }
   return response.json();
 }
 
