@@ -42,6 +42,13 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   }
   assert.deepEqual(calls, []);
 
+  const malformed = await fetch(url, {
+    method: "POST", headers: { "content-type": "application/json" }, body: '{"sku":',
+  });
+  assert.equal(malformed.status, 400);
+  assert.match((await malformed.json()).error, /valid JSON/);
+  assert.deepEqual(calls, []);
+
   for (const headers of [
     { "x-correlation-id": "contains space" },
     { "x-correlation-id": "x".repeat(129) },

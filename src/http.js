@@ -47,6 +47,11 @@ const payloadTooLarge = () => Object.assign(
   { statusCode: 413 },
 );
 
+const malformedJson = () => Object.assign(
+  new Error("request body must contain valid JSON"),
+  { statusCode: 400 },
+);
+
 export function body(request, { requireJson = false } = {}) {
   return new Promise((resolve, reject) => {
     const contentType = request.headers["content-type"];
@@ -73,7 +78,7 @@ export function body(request, { requireJson = false } = {}) {
       try {
         resolve(chunks.length ? JSON.parse(Buffer.concat(chunks)) : {});
       } catch (error) {
-        reject(error);
+        reject(error instanceof SyntaxError ? malformedJson() : error);
       }
     });
     request.on("error", (error) => {

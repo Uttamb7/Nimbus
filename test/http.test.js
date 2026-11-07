@@ -26,6 +26,10 @@ test("JSON bodies enforce their declared and streamed size", async () => {
     body(incoming([Buffer.alloc(maxJsonBodyBytes), Buffer.alloc(1)], jsonHeaders), { requireJson: true }),
     (error) => error.statusCode === 413 && /exceeds/.test(error.message),
   );
+  await assert.rejects(
+    body(incoming([Buffer.from('{"missing":')], jsonHeaders), { requireJson: true }),
+    (error) => error.statusCode === 400 && /valid JSON/.test(error.message),
+  );
 });
 
 test("network failures are observed as dependency errors", async (t) => {

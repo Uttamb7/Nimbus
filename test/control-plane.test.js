@@ -28,12 +28,28 @@ test("control plane rejects oversized JSON before changing operational state", a
   assert.equal(operations.metrics("gateway").requestCount, 0);
   assert.deepEqual(await operations.incidents(), []);
 
+  const malformedObservation = await fetch(`${baseUrl}/observe`, {
+    method: "POST",
+    headers: { authorization: "Bearer telemetry-test", "content-type": "application/json" },
+    body: '{"source":',
+  });
+  assert.equal(malformedObservation.status, 400);
+  assert.deepEqual(topology.edges(), []);
+  assert.equal(operations.metrics("gateway").requestCount, 0);
+
   const wrongGraphqlType = await fetch(`${baseUrl}/graphql`, {
     method: "POST",
     headers: { authorization: "Bearer viewer-test", "content-type": "application/graphql" },
     body: "{ services { name } }",
   });
   assert.equal(wrongGraphqlType.status, 415);
+
+  const malformedGraphql = await fetch(`${baseUrl}/graphql`, {
+    method: "POST",
+    headers: { authorization: "Bearer viewer-test", "content-type": "application/json" },
+    body: '{"query":',
+  });
+  assert.equal(malformedGraphql.status, 400);
 
   const observationResponse = await fetch(`${baseUrl}/observe`, {
     method: "POST",
