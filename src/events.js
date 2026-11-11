@@ -5,6 +5,23 @@ export function orderCreated({ correlationId, idempotencyKey, orderId, reservati
   return { eventId: uuid(), correlationId, idempotencyKey, type: "order.created", version: 1, createdAt: now(), orderId, reservationId, ...(traceContext?.traceparent ? { traceContext } : {}) };
 }
 
+export function validateEvent(event) {
+  const strings = ["eventId", "correlationId", "idempotencyKey", "type", "createdAt", "orderId", "reservationId"];
+  const invalid = !event
+    || typeof event !== "object"
+    || Array.isArray(event)
+    || strings.some((field) => typeof event[field] !== "string" || !event[field])
+    || !Number.isInteger(event.version)
+    || event.version < 1
+    || (event.traceContext && (
+      typeof event.traceContext !== "object"
+      || Array.isArray(event.traceContext)
+      || Object.entries(event.traceContext).some(([key, value]) => !["traceparent", "tracestate"].includes(key) || typeof value !== "string")
+    ));
+  if (invalid) throw Object.assign(new Error("invalid event envelope"), { statusCode: 400 });
+  return event;
+}
+
 export class OutboxPublisher {
   constructor({ store, publishEvent, waitFor = wait, random = Math.random, maxAttempts = 10, maxDelayMs = 5_000 }) {
     this.store = store;

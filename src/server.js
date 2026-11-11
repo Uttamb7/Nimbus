@@ -4,7 +4,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import { BrokerConsumer, BrokerPublisher, consumers } from "./broker.js";
 import { config } from "./config.js";
 import { EventStore } from "./event-store.js";
-import { orderCreated, OutboxPublisher } from "./events.js";
+import { orderCreated, OutboxPublisher, validateEvent } from "./events.js";
 import { body, request, send } from "./http.js";
 import { annotateTrace, currentTraceContext } from "./tracing.js";
 
@@ -32,6 +32,7 @@ function requestIdentifier(value, name) {
 }
 
 async function processEvent(event, eventStore) {
+  validateEvent(event);
   annotateTrace({ "nimbus.correlation_id": event.correlationId, "nimbus.idempotency_key": event.idempotencyKey });
   const firstDelivery = eventStore ? await eventStore.recordConsumerEvent(config.name, event.eventId) : !seenEvents.has(event.eventId);
   if (!firstDelivery) return false;

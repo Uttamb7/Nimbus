@@ -1,5 +1,6 @@
 import amqp from "amqplib";
 import { setTimeout as wait } from "node:timers/promises";
+import { validateEvent } from "./events.js";
 import { continueTrace } from "./tracing.js";
 
 export const eventExchange = "nimbus.orders";
@@ -40,11 +41,7 @@ export async function publishConfirmed(channel, event) {
 }
 
 function parseEvent(message) {
-  const event = JSON.parse(message.content.toString());
-  const strings = ["eventId", "correlationId", "idempotencyKey", "type", "createdAt", "orderId", "reservationId"];
-  if (strings.some((field) => typeof event[field] !== "string" || !event[field]) || !Number.isInteger(event.version) || event.version < 1) throw new Error("invalid event envelope");
-  if (event.traceContext && (typeof event.traceContext !== "object" || Array.isArray(event.traceContext) || Object.entries(event.traceContext).some(([key, value]) => !["traceparent", "tracestate"].includes(key) || typeof value !== "string"))) throw new Error("invalid trace context");
-  return event;
+  return validateEvent(JSON.parse(message.content.toString()));
 }
 
 export async function handleDelivery(channel, message, handler, queue) {
