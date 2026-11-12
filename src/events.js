@@ -6,17 +6,22 @@ export function orderCreated({ correlationId, idempotencyKey, orderId, reservati
 }
 
 export function validateEvent(event) {
-  const strings = ["eventId", "correlationId", "idempotencyKey", "type", "createdAt", "orderId", "reservationId"];
+  const identifiers = ["eventId", "correlationId", "idempotencyKey", "orderId", "reservationId"];
+  const canonicalTimestamp = typeof event?.createdAt === "string"
+    && Number.isFinite(Date.parse(event.createdAt))
+    && new Date(event.createdAt).toISOString() === event.createdAt;
   const invalid = !event
     || typeof event !== "object"
     || Array.isArray(event)
-    || strings.some((field) => typeof event[field] !== "string" || !event[field])
-    || !Number.isInteger(event.version)
-    || event.version < 1
-    || (event.traceContext && (
+    || identifiers.some((field) => typeof event[field] !== "string" || !/^[\x21-\x7e]{1,128}$/.test(event[field]))
+    || event.type !== "order.created"
+    || event.version !== 1
+    || !canonicalTimestamp
+    || (event.traceContext !== undefined && (
       typeof event.traceContext !== "object"
+      || event.traceContext === null
       || Array.isArray(event.traceContext)
-      || Object.entries(event.traceContext).some(([key, value]) => !["traceparent", "tracestate"].includes(key) || typeof value !== "string")
+      || Object.entries(event.traceContext).some(([key, value]) => !["traceparent", "tracestate"].includes(key) || typeof value !== "string" || !/^[\x20-\x7e]{1,512}$/.test(value))
     ));
   if (invalid) throw Object.assign(new Error("invalid event envelope"), { statusCode: 400 });
   return event;

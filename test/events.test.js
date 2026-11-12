@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { orderCreated, OutboxPublisher } from "../src/events.js";
+import { orderCreated, OutboxPublisher, validateEvent } from "../src/events.js";
 
 test("order event envelope carries durable delivery identifiers", () => {
   const event = orderCreated(
@@ -19,6 +19,30 @@ test("order event envelope carries durable delivery identifiers", () => {
     reservationId: "reservation-1",
     traceContext: { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" },
   });
+  assert.equal(validateEvent(event), event);
+});
+
+test("order event envelopes enforce the supported bounded contract", () => {
+  const valid = orderCreated(
+    { correlationId: "correlation-1", idempotencyKey: "checkout-1", orderId: "order-1", reservationId: "reservation-1", traceContext: { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", tracestate: "vendor=value" } },
+    () => "2026-08-20T12:00:00.000Z",
+    () => "event-1",
+  );
+
+  for (const change of [
+    { type: "order.updated" },
+    { version: 2 },
+    { createdAt: "2026-08-20" },
+    { eventId: "x".repeat(129) },
+    { correlationId: "line\nbreak" },
+    { traceContext: null },
+    { traceContext: { baggage: "secret" } },
+    { traceContext: { traceparent: "x".repeat(513) } },
+  ]) {
+    assert.throws(() => validateEvent({ ...valid, ...change }), /invalid event envelope/);
+  }
+
+  assert.equal(validateEvent({ ...valid, eventId: "x".repeat(128) }).eventId.length, 128);
 });
 
 test("outbox publisher records retry state and publishes only after broker confirmation", async () => {
