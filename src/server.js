@@ -1,11 +1,10 @@
-import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { setTimeout as wait } from "node:timers/promises";
 import { BrokerConsumer, BrokerPublisher, consumers } from "./broker.js";
 import { config } from "./config.js";
 import { EventStore } from "./event-store.js";
 import { orderCreated, OutboxPublisher, validateEvent } from "./events.js";
-import { body, request, send } from "./http.js";
+import { body, createHttpServer, request, send } from "./http.js";
 import { annotateTrace, currentTraceContext } from "./tracing.js";
 
 const seenEvents = new Set();
@@ -128,7 +127,7 @@ export async function start(port = config.port, dependencies = {}) {
   }
   if (consumers.includes(config.name) && eventStore && config.brokerUrl && !consumer) consumer = new BrokerConsumer({ url: config.brokerUrl, name: config.name, handler: (event) => processEvent(event, eventStore) });
 
-  const server = createServer((req, res) => route(req, res, eventStore).catch((error) => {
+  const server = createHttpServer((req, res) => route(req, res, eventStore).catch((error) => {
     console.error(JSON.stringify({ type: "error", service: config.name, message: error.message }));
     const status = error.statusCode || 502;
     if (!res.headersSent) send(res, status, { error: status === 502 ? "dependency failure" : error.message, correlationId: res.getHeader("x-correlation-id") });

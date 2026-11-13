@@ -1,9 +1,8 @@
-import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { graphql } from "graphql";
 import { config } from "./config.js";
-import { body, send } from "./http.js";
+import { body, createHttpServer, send } from "./http.js";
 import { root, schema, serviceNames } from "./schema.js";
 import { Topology } from "./topology.js";
 import { Operations, pollOutbox } from "./operations.js";
@@ -56,7 +55,7 @@ async function route(request, response) {
 
 export async function start(port = config.port) {
   await history.migrate();
-  const server = createServer((request, response) => route(request, response).catch((error) => send(response, error.statusCode || 400, { errors: [{ message: error.message }] })));
+  const server = createHttpServer((request, response) => route(request, response).catch((error) => send(response, error.statusCode || 400, { errors: [{ message: error.message }] })));
   attachSubscriptions(server, { topology, operations, authTokens: config.authTokens, rateLimiter });
   const monitor = setInterval(() => {
     void pollQueues(queues, operations);

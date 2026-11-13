@@ -1,8 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
-import { body, maxJsonBodyBytes, request } from "../src/http.js";
+import { body, createHttpServer, httpServerLimits, maxJsonBodyBytes, request } from "../src/http.js";
 import { Topology } from "../src/topology.js";
+
+test("HTTP servers bound header, request, and idle connection time", () => {
+  const server = createHttpServer(() => {});
+  assert.equal(server.headersTimeout, httpServerLimits.headersTimeout);
+  assert.equal(server.requestTimeout, httpServerLimits.requestTimeout);
+  assert.equal(server.keepAliveTimeout, httpServerLimits.keepAliveTimeout);
+});
 
 const incoming = (chunks, headers = {}) => Object.assign(Readable.from(chunks), { headers });
 

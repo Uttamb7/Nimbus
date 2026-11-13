@@ -1,4 +1,15 @@
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+
+export const httpServerLimits = Object.freeze({
+  headersTimeout: 5_000,
+  requestTimeout: 10_000,
+  keepAliveTimeout: 5_000,
+});
+
+export function createHttpServer(handler) {
+  return createServer(httpServerLimits, handler);
+}
 
 function report(url, status, started, correlationId) {
   const observation = { source: process.env.SERVICE_NAME, destination: new URL(url).hostname, protocol: "HTTP", status, durationMs: performance.now() - started, correlationId };
