@@ -5,10 +5,14 @@ export const httpServerLimits = Object.freeze({
   headersTimeout: 5_000,
   requestTimeout: 10_000,
   keepAliveTimeout: 5_000,
+  maxConnections: 128,
 });
 
 export function createHttpServer(handler) {
-  return createServer(httpServerLimits, handler);
+  const { maxConnections, ...options } = httpServerLimits;
+  const server = createServer(options, handler);
+  server.maxConnections = maxConnections;
+  return server;
 }
 
 function report(url, status, started, correlationId) {

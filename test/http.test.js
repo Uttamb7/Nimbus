@@ -4,11 +4,12 @@ import { Readable } from "node:stream";
 import { body, createHttpServer, httpServerLimits, maxJsonBodyBytes, request } from "../src/http.js";
 import { Topology } from "../src/topology.js";
 
-test("HTTP servers bound header, request, and idle connection time", () => {
+test("HTTP servers bound time and concurrent connections", () => {
   const server = createHttpServer(() => {});
   assert.equal(server.headersTimeout, httpServerLimits.headersTimeout);
   assert.equal(server.requestTimeout, httpServerLimits.requestTimeout);
   assert.equal(server.keepAliveTimeout, httpServerLimits.keepAliveTimeout);
+  assert.equal(server.maxConnections, httpServerLimits.maxConnections);
 });
 
 const incoming = (chunks, headers = {}) => Object.assign(Readable.from(chunks), { headers });
