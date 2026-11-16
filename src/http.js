@@ -21,6 +21,38 @@ function report(url, status, started, correlationId) {
   if (process.env.TELEMETRY_URL) fetch(process.env.TELEMETRY_URL, { method: "POST", headers: { "content-type": "application/json", ...(process.env.TELEMETRY_TOKEN ? { authorization: `Bearer ${process.env.TELEMETRY_TOKEN}` } : {}) }, body: JSON.stringify(observation) }).catch(() => {});
 }
 
+export const maxJsonBodyBytes = 64 * 1024;
+
+const dependencyPayloadTooLarge = () => new Error(
+  `dependency response exceeds ${maxJsonBodyBytes} bytes`,
+);
+
+async function responseJson(response) {
+  if (!response.headers?.get || !response.body?.getReader) return response.json();
+  if (Number(response.headers.get("content-length")) > maxJsonBodyBytes) {
+    await response.body.cancel();
+    throw dependencyPayloadTooLarge();
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxJsonBodyBytes) {
+        await reader.cancel();
+        throw dependencyPayloadTooLarge();
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return JSON.parse(Buffer.concat(chunks));
+}
+
 export async function request(url, options = {}, correlationId = randomUUID()) {
   const started = performance.now();
   let response;
@@ -41,7 +73,7 @@ export async function request(url, options = {}, correlationId = randomUUID()) {
       response.status === 409 ? { statusCode: 409 } : {},
     );
   }
-  return response.json();
+  return responseJson(response);
 }
 
 export function send(response, status, body) {
@@ -49,8 +81,6 @@ export function send(response, status, body) {
   response.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(data) });
   response.end(data);
 }
-
-export const maxJsonBodyBytes = 64 * 1024;
 
 const unsupportedMediaType = () => Object.assign(
   new Error("content-type must be application/json"),

@@ -8,12 +8,21 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   const identifiers = [];
   let rejectIdentity = false;
   let rejectOrder = false;
+  let oversizedIdentity = false;
   const dependency = createServer((request, response) => {
     calls.push(request.url);
     identifiers.push({ correlationId: request.headers["x-correlation-id"], idempotencyKey: request.headers["idempotency-key"] });
     if (request.url === "/users/me" && rejectIdentity) {
       response.writeHead(503, { "content-type": "application/json" });
       return response.end('{"error":"unavailable"}');
+    }
+    if (request.url === "/users/me" && oversizedIdentity) {
+      const payload = JSON.stringify({ value: "x".repeat(64 * 1024) });
+      response.writeHead(200, {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(payload),
+      });
+      return response.end(payload);
     }
     if (request.url === "/orders" && rejectOrder) {
       response.writeHead(409, { "content-type": "application/json" });
@@ -85,6 +94,17 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   assert.deepEqual(calls, ["/users/me"]);
 
   rejectIdentity = false;
+  oversizedIdentity = true;
+  calls.length = 0;
+  const oversized = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sku: "demo", quantity: 1 }),
+  });
+  assert.equal(oversized.status, 502);
+  assert.deepEqual(calls, ["/users/me"]);
+
+  oversizedIdentity = false;
   calls.length = 0;
   const response = await fetch(url, {
     method: "POST",

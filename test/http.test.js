@@ -53,6 +53,38 @@ test("network failures are observed as dependency errors", async (t) => {
   assert.equal(topology.edges()[0].errorCount, 1);
 });
 
+test("dependency JSON responses enforce their declared and streamed size", async (t) => {
+  process.env.SERVICE_NAME = "gateway";
+  delete process.env.TELEMETRY_URL;
+  t.mock.method(console, "log", () => {});
+  let response = new Response('{"ok":true}', { headers: { "content-length": "11" } });
+  t.mock.method(globalThis, "fetch", async () => response);
+
+  assert.deepEqual(await request("http://identity-api/users/me"), { ok: true });
+
+  let cancellations = 0;
+  response = new Response(new ReadableStream({
+    pull() {},
+    cancel() { cancellations += 1; },
+  }), { headers: { "content-length": maxJsonBodyBytes + 1 } });
+  await assert.rejects(
+    request("http://identity-api/users/me"),
+    /dependency response exceeds 65536 bytes/,
+  );
+
+  let index = 0;
+  const chunks = [new Uint8Array(maxJsonBodyBytes), new Uint8Array(1)];
+  response = new Response(new ReadableStream({
+    pull(controller) { controller.enqueue(chunks[index++]); },
+    cancel() { cancellations += 1; },
+  }));
+  await assert.rejects(
+    request("http://identity-api/users/me"),
+    /dependency response exceeds 65536 bytes/,
+  );
+  assert.equal(cancellations, 2);
+});
+
 test("dependency reports send the configured telemetry credential", async (t) => {
   process.env.SERVICE_NAME = "gateway";
   process.env.TELEMETRY_URL = "http://control-plane:4000/observe";
