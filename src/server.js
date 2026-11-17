@@ -30,6 +30,18 @@ function requestIdentifier(value, name) {
   return value;
 }
 
+function dependencyIdentifier(input, name) {
+  const value = input?.[name];
+  if (
+    input === null
+    || typeof input !== "object"
+    || Array.isArray(input)
+    || typeof value !== "string"
+    || !/^[\x21-\x7e]{1,128}$/.test(value)
+  ) throw new Error(`invalid dependency ${name}`);
+  return value;
+}
+
 async function processEvent(event, eventStore) {
   validateEvent(event);
   annotateTrace({ "nimbus.correlation_id": event.correlationId, "nimbus.idempotency_key": event.idempotencyKey });
@@ -83,8 +95,12 @@ async function route(req, res, eventStore) {
     const idempotencyKey = requestIdentifier(req.headers["idempotency-key"], "idempotency-key");
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const user = await request(`${config.identityUrl}/users/me`, {}, correlationId);
+    const userId = dependencyIdentifier(user, "id");
+    if (user.active !== true) throw new Error("invalid dependency user status");
     const order = await request(`${config.orderUrl}/orders`, { method: "POST", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify(input) }, correlationId);
-    return send(res, 202, { userId: user.id, ...order, correlationId });
+    const orderId = dependencyIdentifier(order, "orderId");
+    if (order.status !== "accepted") throw new Error("invalid dependency order status");
+    return send(res, 202, { userId, orderId, status: "accepted", correlationId });
   }
 
   if (config.name === "order-orchestrator" && url.pathname === "/orders" && req.method === "POST") {
@@ -94,7 +110,8 @@ async function route(req, res, eventStore) {
     annotateTrace({ "nimbus.idempotency_key": idempotencyKey });
     const createEvent = async () => {
       const reservation = await request(`${config.inventoryUrl}/reserve`, { method: "POST", headers: { "idempotency-key": idempotencyKey }, body: JSON.stringify(input) }, correlationId);
-      return orderCreated({ correlationId, idempotencyKey, orderId: randomUUID(), reservationId: reservation.reservationId, traceContext: currentTraceContext() });
+      const reservationId = dependencyIdentifier(reservation, "reservationId");
+      return orderCreated({ correlationId, idempotencyKey, orderId: randomUUID(), reservationId, traceContext: currentTraceContext() });
     };
     const order = eventStore
       ? await eventStore.createOrder(idempotencyKey, input, createEvent)

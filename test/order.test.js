@@ -7,6 +7,7 @@ test("order acceptance persists its outbox event before responding", async (t) =
   let inventoryRequests = 0;
   const inventoryKeys = [];
   let failNextReservation = false;
+  let inventoryPayload = { reservationId: "713615df-5085-4aec-8f45-79580c66b63d" };
   const inventory = createServer((request, response) => {
     inventoryRequests++;
     inventoryKeys.push(request.headers["idempotency-key"]);
@@ -16,7 +17,7 @@ test("order acceptance persists its outbox event before responding", async (t) =
       return response.end('{"error":"unavailable"}');
     }
     response.writeHead(200, { "content-type": "application/json" });
-    response.end('{"reservationId":"713615df-5085-4aec-8f45-79580c66b63d"}');
+    response.end(JSON.stringify(inventoryPayload));
   });
   await new Promise((resolve) => inventory.listen(0, resolve));
   process.env.SERVICE_NAME = "order-orchestrator";
@@ -112,12 +113,24 @@ test("order acceptance persists its outbox event before responding", async (t) =
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
     body: JSON.stringify(input),
   });
+  const persistedBeforeInvalidInventory = persisted.length;
+  for (const invalid of [[], {}, { reservationId: "contains space" }]) {
+    inventoryPayload = invalid;
+    assert.equal((await postOrder(`invalid-inventory-${inventoryRequests}`)).status, 502);
+    assert.equal(persisted.length, persistedBeforeInvalidInventory);
+  }
+  inventoryPayload = { reservationId: "r".repeat(128) };
+  const boundaryReservation = await postOrder("boundary-reservation");
+  assert.equal(boundaryReservation.status, 202);
+  assert.equal(persisted.at(-1).reservationId, "r".repeat(128));
+  const persistedAfterBoundary = persisted.length;
+
   const inventoryBeforeReplay = inventoryRequests;
   const replay = await postOrder("i".repeat(128), { sku: "x".repeat(64), quantity: 100 });
   assert.equal(replay.status, 202);
   assert.equal((await replay.json()).orderId, order.orderId);
   assert.equal(inventoryRequests, inventoryBeforeReplay);
-  assert.equal(persisted.length, 2);
+  assert.equal(persisted.length, persistedAfterBoundary);
 
   const conflict = await fetch(`http://127.0.0.1:${server.address().port}/orders`, {
     method: "POST",
@@ -126,7 +139,7 @@ test("order acceptance persists its outbox event before responding", async (t) =
   });
   assert.equal(conflict.status, 409);
   assert.equal(inventoryRequests, inventoryBeforeReplay);
-  assert.equal(persisted.length, 2);
+  assert.equal(persisted.length, persistedAfterBoundary);
 
   const [concurrentA, concurrentB] = await Promise.all([
     postOrder("concurrent-order"), postOrder("concurrent-order"),
@@ -135,7 +148,7 @@ test("order acceptance persists its outbox event before responding", async (t) =
   assert.equal(concurrentB.status, 202);
   assert.equal((await concurrentA.json()).orderId, (await concurrentB.json()).orderId);
   assert.equal(inventoryRequests, inventoryBeforeReplay + 1);
-  assert.equal(persisted.length, 3);
+  assert.equal(persisted.length, persistedAfterBoundary + 1);
 
   failNextReservation = true;
   assert.equal((await postOrder("retry-after-failure")).status, 502);
@@ -143,7 +156,7 @@ test("order acceptance persists its outbox event before responding", async (t) =
   assert.equal(retried.status, 202);
   assert.ok((await retried.json()).orderId);
   assert.equal(inventoryRequests, inventoryBeforeReplay + 3);
-  assert.equal(persisted.length, 4);
+  assert.equal(persisted.length, persistedAfterBoundary + 2);
   assert.ok(inventoryKeys.every((key) => typeof key === "string" && key.length > 0));
   assert.ok(inventoryKeys.includes("concurrent-order"));
   assert.equal(inventoryKeys.filter((key) => key === "retry-after-failure").length, 2);

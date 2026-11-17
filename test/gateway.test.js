@@ -9,6 +9,8 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   let rejectIdentity = false;
   let rejectOrder = false;
   let oversizedIdentity = false;
+  let identityPayload = { id: "demo-user", active: true };
+  let orderPayload = { orderId: "order-1", status: "accepted" };
   const dependency = createServer((request, response) => {
     calls.push(request.url);
     identifiers.push({ correlationId: request.headers["x-correlation-id"], idempotencyKey: request.headers["idempotency-key"] });
@@ -29,9 +31,7 @@ test("checkout requires JSON before calling dependencies", async (t) => {
       return response.end('{"error":"conflicting idempotency key"}');
     }
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(request.url === "/users/me"
-      ? '{"id":"demo-user"}'
-      : '{"orderId":"order-1","status":"accepted"}');
+    response.end(JSON.stringify(request.url === "/users/me" ? identityPayload : orderPayload));
   });
   await new Promise((resolve) => dependency.listen(0, resolve));
   process.env.SERVICE_NAME = "gateway";
@@ -105,6 +105,32 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   assert.deepEqual(calls, ["/users/me"]);
 
   oversizedIdentity = false;
+  for (const invalid of [[], { id: "demo-user" }, { id: "contains space", active: true }]) {
+    identityPayload = invalid;
+    calls.length = 0;
+    const rejectedPayload = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sku: "demo", quantity: 1 }),
+    });
+    assert.equal(rejectedPayload.status, 502);
+    assert.deepEqual(calls, ["/users/me"]);
+  }
+
+  identityPayload = { id: "u".repeat(128), active: true };
+  for (const invalid of [{}, { orderId: "contains space", status: "accepted" }, { orderId: "order-1", status: "pending" }]) {
+    orderPayload = invalid;
+    calls.length = 0;
+    const rejectedPayload = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sku: "demo", quantity: 1 }),
+    });
+    assert.equal(rejectedPayload.status, 502);
+    assert.deepEqual(calls, ["/users/me", "/orders"]);
+  }
+
+  orderPayload = { orderId: "o".repeat(128), status: "accepted" };
   calls.length = 0;
   const response = await fetch(url, {
     method: "POST",
@@ -117,7 +143,10 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   });
   assert.equal(response.status, 202);
   assert.deepEqual(calls, ["/users/me", "/orders"]);
-  assert.equal((await response.json()).correlationId, "c".repeat(128));
+  assert.deepEqual(await response.json(), {
+    userId: "u".repeat(128), orderId: "o".repeat(128), status: "accepted",
+    correlationId: "c".repeat(128),
+  });
   assert.deepEqual(identifiers.slice(-2), [
     { correlationId: "c".repeat(128), idempotencyKey: undefined },
     { correlationId: "c".repeat(128), idempotencyKey: "i".repeat(128) },
