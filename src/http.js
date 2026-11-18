@@ -28,7 +28,12 @@ const dependencyPayloadTooLarge = () => new Error(
 );
 
 async function responseJson(response) {
-  if (!response.headers?.get || !response.body?.getReader) return response.json();
+  const contentType = response.headers?.get?.("content-type");
+  if (typeof contentType !== "string" || contentType.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+    await response.body?.cancel?.();
+    throw new Error("dependency response must be application/json");
+  }
+  if (!response.body?.getReader) return response.json();
   if (Number(response.headers.get("content-length")) > maxJsonBodyBytes) {
     await response.body.cancel();
     throw dependencyPayloadTooLarge();

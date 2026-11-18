@@ -53,20 +53,31 @@ test("network failures are observed as dependency errors", async (t) => {
   assert.equal(topology.edges()[0].errorCount, 1);
 });
 
-test("dependency JSON responses enforce their declared and streamed size", async (t) => {
+test("dependency JSON responses require their media type and enforce their size", async (t) => {
   process.env.SERVICE_NAME = "gateway";
   delete process.env.TELEMETRY_URL;
   t.mock.method(console, "log", () => {});
-  let response = new Response('{"ok":true}', { headers: { "content-length": "11" } });
+  let response = new Response('{"ok":true}', { headers: { "content-type": "Application/JSON; charset=utf-8", "content-length": "11" } });
   t.mock.method(globalThis, "fetch", async () => response);
 
   assert.deepEqual(await request("http://identity-api/users/me"), { ok: true });
 
   let cancellations = 0;
+  for (const contentType of [undefined, "text/plain"]) {
+    response = new Response(new ReadableStream({
+      pull() {},
+      cancel() { cancellations += 1; },
+    }), { headers: contentType ? { "content-type": contentType } : {} });
+    await assert.rejects(
+      request("http://identity-api/users/me"),
+      /dependency response must be application\/json/,
+    );
+  }
+
   response = new Response(new ReadableStream({
     pull() {},
     cancel() { cancellations += 1; },
-  }), { headers: { "content-length": maxJsonBodyBytes + 1 } });
+  }), { headers: { "content-type": "application/json", "content-length": maxJsonBodyBytes + 1 } });
   await assert.rejects(
     request("http://identity-api/users/me"),
     /dependency response exceeds 65536 bytes/,
@@ -77,12 +88,12 @@ test("dependency JSON responses enforce their declared and streamed size", async
   response = new Response(new ReadableStream({
     pull(controller) { controller.enqueue(chunks[index++]); },
     cancel() { cancellations += 1; },
-  }));
+  }), { headers: { "content-type": "application/json" } });
   await assert.rejects(
     request("http://identity-api/users/me"),
     /dependency response exceeds 65536 bytes/,
   );
-  assert.equal(cancellations, 2);
+  assert.equal(cancellations, 4);
 });
 
 test("dependency reports send the configured telemetry credential", async (t) => {
@@ -96,7 +107,7 @@ test("dependency reports send the configured telemetry credential", async (t) =>
   const reports = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {
     if (url === process.env.TELEMETRY_URL) reports.push(options);
-    return { ok: true, status: 200, json: async () => ({}) };
+    return new Response("{}", { headers: { "content-type": "application/json" } });
   });
   t.mock.method(console, "log", () => {});
 

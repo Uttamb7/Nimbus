@@ -7,6 +7,7 @@ test("order acceptance persists its outbox event before responding", async (t) =
   let inventoryRequests = 0;
   const inventoryKeys = [];
   let failNextReservation = false;
+  let invalidInventoryContentType = false;
   let inventoryPayload = { reservationId: "713615df-5085-4aec-8f45-79580c66b63d" };
   const inventory = createServer((request, response) => {
     inventoryRequests++;
@@ -16,7 +17,7 @@ test("order acceptance persists its outbox event before responding", async (t) =
       response.writeHead(503, { "content-type": "application/json" });
       return response.end('{"error":"unavailable"}');
     }
-    response.writeHead(200, { "content-type": "application/json" });
+    response.writeHead(200, { "content-type": invalidInventoryContentType ? "text/plain" : "application/json" });
     response.end(JSON.stringify(inventoryPayload));
   });
   await new Promise((resolve) => inventory.listen(0, resolve));
@@ -114,6 +115,10 @@ test("order acceptance persists its outbox event before responding", async (t) =
     body: JSON.stringify(input),
   });
   const persistedBeforeInvalidInventory = persisted.length;
+  invalidInventoryContentType = true;
+  assert.equal((await postOrder("invalid-inventory-media-type")).status, 502);
+  assert.equal(persisted.length, persistedBeforeInvalidInventory);
+  invalidInventoryContentType = false;
   for (const invalid of [[], {}, { reservationId: "contains space" }]) {
     inventoryPayload = invalid;
     assert.equal((await postOrder(`invalid-inventory-${inventoryRequests}`)).status, 502);

@@ -9,6 +9,7 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   let rejectIdentity = false;
   let rejectOrder = false;
   let oversizedIdentity = false;
+  let invalidIdentityContentType = false;
   let identityPayload = { id: "demo-user", active: true };
   let orderPayload = { orderId: "order-1", status: "accepted" };
   const dependency = createServer((request, response) => {
@@ -25,6 +26,10 @@ test("checkout requires JSON before calling dependencies", async (t) => {
         "content-length": Buffer.byteLength(payload),
       });
       return response.end(payload);
+    }
+    if (request.url === "/users/me" && invalidIdentityContentType) {
+      response.writeHead(200, { "content-type": "text/plain" });
+      return response.end(JSON.stringify(identityPayload));
     }
     if (request.url === "/orders" && rejectOrder) {
       response.writeHead(409, { "content-type": "application/json" });
@@ -105,6 +110,17 @@ test("checkout requires JSON before calling dependencies", async (t) => {
   assert.deepEqual(calls, ["/users/me"]);
 
   oversizedIdentity = false;
+  invalidIdentityContentType = true;
+  calls.length = 0;
+  const wrongRepresentation = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sku: "demo", quantity: 1 }),
+  });
+  assert.equal(wrongRepresentation.status, 502);
+  assert.deepEqual(calls, ["/users/me"]);
+
+  invalidIdentityContentType = false;
   for (const invalid of [[], { id: "demo-user" }, { id: "contains space", active: true }]) {
     identityPayload = invalid;
     calls.length = 0;
