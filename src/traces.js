@@ -1,3 +1,5 @@
+import { readJsonResponse } from "./http.js";
+
 const services = new Set(["gateway", "identity-api", "inventory-api", "order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor"]);
 
 const tag = (span, key) => span.tags?.find((value) => value.key === key)?.value;
@@ -39,18 +41,13 @@ export class Traces {
     }
     let response;
     try {
-      response = await this.request(url);
+      response = await this.request(url, { signal: AbortSignal.timeout(2_000) });
     } catch (error) {
       throw new Error("trace backend unavailable: " + error.message);
     }
     if (!response.ok) throw new Error("trace backend returned " + response.status);
 
-    let result;
-    try {
-      result = await response.json();
-    } catch {
-      throw new Error("trace backend returned malformed data");
-    }
+    const result = await readJsonResponse(response, "trace backend response");
     if (!Array.isArray(result?.data)) throw new Error("trace backend returned malformed data");
     return result.data.map((trace) => this.#map(trace)).sort((a, b) => b.startTime.localeCompare(a.startTime));
   }

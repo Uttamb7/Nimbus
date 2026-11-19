@@ -23,21 +23,21 @@ function report(url, status, started, correlationId) {
 
 export const maxJsonBodyBytes = 64 * 1024;
 
-const dependencyPayloadTooLarge = () => new Error(
-  `dependency response exceeds ${maxJsonBodyBytes} bytes`,
+const responseTooLarge = (label) => new Error(
+  `${label} exceeds ${maxJsonBodyBytes} bytes`,
 );
 
-async function responseJson(response) {
+export async function readJsonResponse(response, label = "dependency response") {
   const contentType = response.headers?.get?.("content-type");
   if (typeof contentType !== "string" || contentType.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
     await response.body?.cancel?.();
-    throw new Error("dependency response must be application/json");
+    throw new Error(`${label} must be application/json`);
+  }
+  if (Number(response.headers.get("content-length")) > maxJsonBodyBytes) {
+    await response.body?.cancel?.();
+    throw responseTooLarge(label);
   }
   if (!response.body?.getReader) return response.json();
-  if (Number(response.headers.get("content-length")) > maxJsonBodyBytes) {
-    await response.body.cancel();
-    throw dependencyPayloadTooLarge();
-  }
   const reader = response.body.getReader();
   const chunks = [];
   let size = 0;
@@ -48,14 +48,19 @@ async function responseJson(response) {
       size += value.byteLength;
       if (size > maxJsonBodyBytes) {
         await reader.cancel();
-        throw dependencyPayloadTooLarge();
+        throw responseTooLarge(label);
       }
       chunks.push(value);
     }
   } finally {
     reader.releaseLock();
   }
-  return JSON.parse(Buffer.concat(chunks));
+  try {
+    return JSON.parse(Buffer.concat(chunks));
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error(`${label} contains malformed JSON`);
+    throw error;
+  }
 }
 
 export async function request(url, options = {}, correlationId = randomUUID()) {
@@ -78,7 +83,7 @@ export async function request(url, options = {}, correlationId = randomUUID()) {
       response.status === 409 ? { statusCode: 409 } : {},
     );
   }
-  return responseJson(response);
+  return readJsonResponse(response);
 }
 
 export function send(response, status, body) {

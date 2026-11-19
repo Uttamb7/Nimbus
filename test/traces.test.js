@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { maxJsonBodyBytes } from "../src/http.js";
 import { Traces } from "../src/traces.js";
+
+const jsonResponse = (body) => new Response(body, { headers: { "content-type": "application/json" } });
 
 const rawTrace = {
   traceID: "0123456789abcdef0123456789abcdef",
@@ -13,9 +16,10 @@ const rawTrace = {
 
 test("recent traces maps bounded Jaeger data without span tags", async () => {
   let requested;
-  const traces = new Traces({ baseUrl: "http://jaeger:16686", request: async (url) => { requested = url; return new Response(JSON.stringify({ data: [rawTrace] })); } });
+  const traces = new Traces({ baseUrl: "http://jaeger:16686", request: async (url, options) => { requested = { url, options }; return jsonResponse(JSON.stringify({ data: [rawTrace] })); } });
   const result = await traces.recent({ service: "gateway", limit: 3 });
-  assert.equal(requested.href, "http://jaeger:16686/api/traces?service=gateway&limit=3&lookback=1h");
+  assert.equal(requested.url.href, "http://jaeger:16686/api/traces?service=gateway&limit=3&lookback=1h");
+  assert.ok(requested.options.signal instanceof AbortSignal);
   assert.deepEqual(result[0].services, ["gateway", "inventory-api"]);
   assert.equal(result[0].durationMs, 12.5);
   assert.deepEqual(result[0].spans[1], { spanId: "2222222222222222", parentSpanId: "1111111111111111", service: "inventory-api", operation: "GET /reserve", startTime: "2023-11-14T22:13:20.002Z", durationMs: 4, error: true });
@@ -27,16 +31,28 @@ test("recent traces validates queries and backend responses", async () => {
   await assert.rejects(traces.recent({ service: "missing" }), /unknown service/);
   await assert.rejects(traces.recent({ service: "gateway", limit: 21 }), /1-20/);
   await assert.rejects(traces.recent({ service: "gateway" }), /returned 503/);
-  await assert.rejects(new Traces({ baseUrl: "http://jaeger:16686", request: async () => new Response("{}") }).recent({ service: "gateway" }), /malformed/);
+  await assert.rejects(new Traces({ baseUrl: "http://jaeger:16686", request: async () => jsonResponse("{}") }).recent({ service: "gateway" }), /malformed/);
+  await assert.rejects(new Traces({ baseUrl: "http://jaeger:16686", request: async () => new Response("{}") }).recent({ service: "gateway" }), /must be application\/json/);
+  await assert.rejects(new Traces({ baseUrl: "http://jaeger:16686", request: async () => new Response("not-json", { headers: { "content-type": "application/json" } }) }).recent({ service: "gateway" }), /malformed JSON/);
   await assert.rejects(new Traces({ baseUrl: "http://jaeger:16686", request: async () => { throw new Error("offline"); } }).recent({ service: "gateway" }), /unavailable: offline/);
   await assert.rejects(new Traces().recent({ service: "gateway" }), /not configured/);
+
+  let canceled = false;
+  const oversized = new Response(new ReadableStream({ pull() {}, cancel() { canceled = true; } }), {
+    headers: { "content-type": "application/json", "content-length": maxJsonBodyBytes + 1 },
+  });
+  await assert.rejects(
+    new Traces({ baseUrl: "http://jaeger:16686", request: async () => oversized }).recent({ service: "gateway" }),
+    /exceeds 65536 bytes/,
+  );
+  assert.equal(canceled, true);
 });
 
 test("trace search sends an exact bounded Jaeger window", async () => {
   let requested;
   const traces = new Traces({ baseUrl: "http://jaeger:16686", request: async (url) => {
     requested = url;
-    return new Response(JSON.stringify({ data: [rawTrace] }));
+    return jsonResponse(JSON.stringify({ data: [rawTrace] }));
   } });
   await traces.search({
     service: "gateway",

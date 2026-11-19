@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { maxJsonBodyBytes } from "../src/http.js";
 import { pollQueues, Queues } from "../src/queues.js";
+
+const jsonResponse = (body) => new Response(body, { headers: { "content-type": "application/json" } });
 
 test("queue monitor maps only bounded Nimbus queue state", async () => {
   let requested;
@@ -10,7 +13,7 @@ test("queue monitor maps only bounded Nimbus queue state", async () => {
     password: "secret",
     request: async (url, options) => {
       requested = { url, options };
-      return new Response(JSON.stringify([
+      return jsonResponse(JSON.stringify([
         { name: "other", messages_ready: 99, messages_unacknowledged: 0, consumers: 0 },
         { name: "nimbus.payment-worker", messages_ready: 3, messages_unacknowledged: 1, consumers: 0, message_stats: { ack_details: { rate: 1.5 }, publish_details: { rate: 2.5 } } },
         { name: "nimbus.dead-letter", messages_ready: 2, messages_unacknowledged: 0, consumers: 0 },
@@ -31,10 +34,21 @@ test("queue monitor isolates configuration, transport, and malformed responses",
   await assert.rejects(new Queues().list(), /not configured/);
   await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => { throw new Error("offline"); } }).list(), /unavailable: offline/);
   await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response("bad", { status: 503 }) }).list(), /returned 503/);
-  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response("{}") }).list(), /malformed/);
-  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response('[{"name":"nimbus.dead-letter","messages_ready":-1,"messages_unacknowledged":0,"consumers":0}]') }).list(), /malformed/);
-  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response('[{"name":"nimbus.payment-worker","messages_ready":0,"messages_unacknowledged":1,"consumers":1,"message_stats":{"ack_details":{"rate":-1}}}]') }).list(), /malformed/);
-  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response('[{"name":"nimbus.payment-worker","messages_ready":0,"messages_unacknowledged":1,"consumers":1,"message_stats":{"publish_details":{"rate":-1}}}]') }).list(), /malformed/);
+  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => jsonResponse("{}") }).list(), /malformed/);
+  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => new Response("[]") }).list(), /must be application\/json/);
+  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => jsonResponse('[{"name":"nimbus.dead-letter","messages_ready":-1,"messages_unacknowledged":0,"consumers":0}]') }).list(), /malformed/);
+  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => jsonResponse('[{"name":"nimbus.payment-worker","messages_ready":0,"messages_unacknowledged":1,"consumers":1,"message_stats":{"ack_details":{"rate":-1}}}]') }).list(), /malformed/);
+  await assert.rejects(new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => jsonResponse('[{"name":"nimbus.payment-worker","messages_ready":0,"messages_unacknowledged":1,"consumers":1,"message_stats":{"publish_details":{"rate":-1}}}]') }).list(), /malformed/);
+
+  let canceled = false;
+  const oversized = new Response(new ReadableStream({ pull() {}, cancel() { canceled = true; } }), {
+    headers: { "content-type": "application/json", "content-length": maxJsonBodyBytes + 1 },
+  });
+  await assert.rejects(
+    new Queues({ baseUrl: "http://rabbitmq", username: "n", password: "p", request: async () => oversized }).list(),
+    /exceeds 65536 bytes/,
+  );
+  assert.equal(canceled, true);
 });
 
 test("queue polling observes only consumer queues and isolates backend failures", async () => {

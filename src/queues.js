@@ -1,3 +1,5 @@
+import { readJsonResponse } from "./http.js";
+
 const knownQueues = new Set([
   "nimbus.payment-worker",
   "nimbus.notification-router",
@@ -47,12 +49,7 @@ export class Queues {
     }
     if (!response.ok) throw new Error("queue backend returned " + response.status);
 
-    let result;
-    try {
-      result = await response.json();
-    } catch {
-      throw new Error("queue backend returned malformed data");
-    }
+    const result = await readJsonResponse(response, "queue backend response");
     if (!Array.isArray(result)) throw new Error("queue backend returned malformed data");
     const queues = result.filter((queue) => knownQueues.has(queue?.name)).map((queue) => {
       const counts = [queue.messages_ready, queue.messages_unacknowledged, queue.consumers];
