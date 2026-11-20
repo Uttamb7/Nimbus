@@ -18,7 +18,7 @@ export function createHttpServer(handler) {
 function report(url, status, started, correlationId) {
   const observation = { source: process.env.SERVICE_NAME, destination: new URL(url).hostname, protocol: "HTTP", status, durationMs: performance.now() - started, correlationId };
   console.log(JSON.stringify({ type: "dependency", ...observation }));
-  if (process.env.TELEMETRY_URL) fetch(process.env.TELEMETRY_URL, { method: "POST", headers: { "content-type": "application/json", ...(process.env.TELEMETRY_TOKEN ? { authorization: `Bearer ${process.env.TELEMETRY_TOKEN}` } : {}) }, body: JSON.stringify(observation) }).catch(() => {});
+  if (process.env.TELEMETRY_URL) fetch(process.env.TELEMETRY_URL, { method: "POST", headers: { "content-type": "application/json", ...(process.env.TELEMETRY_TOKEN ? { authorization: `Bearer ${process.env.TELEMETRY_TOKEN}` } : {}) }, body: JSON.stringify(observation), signal: AbortSignal.timeout(2_000) }).catch(() => {});
 }
 
 export const maxJsonBodyBytes = 64 * 1024;

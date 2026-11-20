@@ -96,7 +96,7 @@ test("dependency JSON responses require their media type and enforce their size"
   assert.equal(cancellations, 4);
 });
 
-test("dependency reports send the configured telemetry credential", async (t) => {
+test("dependency reports are authenticated, bounded, and isolated", async (t) => {
   process.env.SERVICE_NAME = "gateway";
   process.env.TELEMETRY_URL = "http://control-plane:4000/observe";
   process.env.TELEMETRY_TOKEN = "telemetry-test";
@@ -106,7 +106,10 @@ test("dependency reports send the configured telemetry credential", async (t) =>
   });
   const reports = [];
   t.mock.method(globalThis, "fetch", async (url, options) => {
-    if (url === process.env.TELEMETRY_URL) reports.push(options);
+    if (url === process.env.TELEMETRY_URL) {
+      reports.push(options);
+      throw new Error("telemetry unavailable");
+    }
     return new Response("{}", { headers: { "content-type": "application/json" } });
   });
   t.mock.method(console, "log", () => {});
@@ -115,4 +118,5 @@ test("dependency reports send the configured telemetry credential", async (t) =>
 
   assert.equal(reports.length, 1);
   assert.equal(reports[0].headers.authorization, "Bearer telemetry-test");
+  assert.ok(reports[0].signal instanceof AbortSignal);
 });
