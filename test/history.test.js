@@ -2,6 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { History } from "../src/history.js";
 
+test("history closes its configured pool and safely skips in-memory storage", async () => {
+  let closes = 0;
+  const history = new History({ pool: { end: async () => { closes += 1; } } });
+
+  await history.close();
+  await new History().close();
+
+  assert.equal(closes, 1);
+});
+
 test("history preserves incident lifecycle and append-only audit records", async () => {
   const history = new History();
   const incident = { id: "9c86d62c-aedd-4f65-9107-7de20b19d98a", severity: "SEV2", status: "OPEN", title: "gateway is unhealthy", suspectedService: "gateway", triggerCondition: "error rate", createdAt: "2026-08-19T12:00:00.000Z", acknowledgedAt: null, resolvedAt: null };

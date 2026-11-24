@@ -42,6 +42,10 @@ export class History {
     return migrate(this.pool, directory);
   }
 
+  async close() {
+    await this.pool?.end?.();
+  }
+
   async createIncident(incident) {
     if (!this.pool) {
       if (this.#incidents.some((value) => value.suspectedService === incident.suspectedService && value.triggerCondition === incident.triggerCondition && value.status !== "RESOLVED")) return null;

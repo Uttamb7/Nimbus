@@ -5,11 +5,13 @@ import { maxJsonBodyBytes } from "../src/http.js";
 process.env.SERVICE_NAME = "control-plane";
 process.env.TELEMETRY_TOKEN = "telemetry-test";
 process.env.AUTH_TOKENS = "viewer-test:viewer:Test Viewer";
-const { operations, start, topology } = await import("../src/control-plane.js");
+const { history, operations, start, topology } = await import("../src/control-plane.js");
 
 test("control plane rejects oversized JSON before changing operational state", async (t) => {
+  let historyCloses = 0;
+  t.mock.method(history, "close", async () => { historyCloses += 1; });
   const server = await start(0);
-  t.after(() => server.close());
+  t.after(() => { if (server.listening) server.close(); });
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const oversizedObservation = JSON.stringify({
     source: "gateway", destination: "identity-api", status: 200, durationMs: 1,
@@ -76,4 +78,8 @@ test("control plane rejects oversized JSON before changing operational state", a
   assert.equal(validResponse.status, 202);
   assert.equal(topology.edges().length, 1);
   assert.equal(operations.metrics("gateway").requestCount, 1);
+
+  await new Promise((resolve) => server.close(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(historyCloses, 1);
 });

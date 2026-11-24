@@ -62,7 +62,12 @@ export async function start(port = config.port) {
     void pollOutbox(history, operations);
   }, 2_000);
   monitor.unref();
-  server.once("close", () => clearInterval(monitor));
+  server.once("close", () => {
+    clearInterval(monitor);
+    void history.close().catch((error) => console.error(JSON.stringify({
+      type: "error", service: config.name, message: error.message,
+    })));
+  });
   void pollQueues(queues, operations);
   void pollOutbox(history, operations);
   return new Promise((resolve) => server.listen(port, () => resolve(server)));
