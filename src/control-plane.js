@@ -32,6 +32,14 @@ async function route(request, response) {
     return response.end(content);
   }
   if (url.pathname === "/health") return send(response, 200, { service: config.name, status: "healthy" });
+  if (url.pathname === "/ready" && request.method === "GET") {
+    try {
+      await history.ready();
+      return send(response, 200, { service: config.name, status: "ready" });
+    } catch {
+      return send(response, 503, { service: config.name, status: "unavailable" });
+    }
+  }
   if (url.pathname === "/observe" && request.method === "POST") {
     if (!authenticateToken(request.headers.authorization, config.telemetryToken)) return send(response, 401, { error: "telemetry authentication required" });
     const observation = await body(request, { requireJson: true });

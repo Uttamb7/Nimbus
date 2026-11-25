@@ -4,6 +4,8 @@ Nimbus stores incidents, their detection-time metric, last measured healthy base
 
 `docker compose up --build` starts PostgreSQL and applies any unapplied files in `migrations/` before the control plane listens. Applied versions are recorded in `schema_migrations`, so restarting the control plane safely reruns the migration check.
 
+The control plane exposes process liveness at `/health` and storage-backed readiness at `/ready`. Its Compose health check uses readiness, which returns 503 without database details while PostgreSQL is unavailable; workload health checks remain independent at `/health`.
+
 Inspect the local history with:
 
 ```bash

@@ -9,10 +9,29 @@ const { history, operations, start, topology } = await import("../src/control-pl
 
 test("control plane rejects oversized JSON before changing operational state", async (t) => {
   let historyCloses = 0;
+  let readinessError;
   t.mock.method(history, "close", async () => { historyCloses += 1; });
+  t.mock.method(history, "ready", async () => {
+    if (readinessError) throw readinessError;
+    return true;
+  });
   const server = await start(0);
   t.after(() => { if (server.listening) server.close(); });
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const ready = await fetch(`${baseUrl}/ready`);
+  assert.equal(ready.status, 200);
+  assert.deepEqual(await ready.json(), { service: "control-plane", status: "ready" });
+
+  readinessError = new Error("secret database address");
+  const unavailable = await fetch(`${baseUrl}/ready`);
+  assert.equal(unavailable.status, 503);
+  assert.deepEqual(await unavailable.json(), {
+    service: "control-plane", status: "unavailable",
+  });
+  const live = await fetch(`${baseUrl}/health`);
+  assert.equal(live.status, 200);
+  assert.deepEqual(await live.json(), { service: "control-plane", status: "healthy" });
+
   const oversizedObservation = JSON.stringify({
     source: "gateway", destination: "identity-api", status: 200, durationMs: 1,
     padding: "x".repeat(maxJsonBodyBytes),

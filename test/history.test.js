@@ -12,6 +12,15 @@ test("history closes its configured pool and safely skips in-memory storage", as
   assert.equal(closes, 1);
 });
 
+test("history readiness checks configured storage and accepts in-memory storage", async () => {
+  let query;
+  const history = new History({ pool: { query: async (sql) => { query = sql; } } });
+
+  assert.equal(await history.ready(), true);
+  assert.equal(query, "SELECT 1");
+  assert.equal(await new History().ready(), true);
+});
+
 test("history preserves incident lifecycle and append-only audit records", async () => {
   const history = new History();
   const incident = { id: "9c86d62c-aedd-4f65-9107-7de20b19d98a", severity: "SEV2", status: "OPEN", title: "gateway is unhealthy", suspectedService: "gateway", triggerCondition: "error rate", createdAt: "2026-08-19T12:00:00.000Z", acknowledgedAt: null, resolvedAt: null };

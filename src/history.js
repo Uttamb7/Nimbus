@@ -46,6 +46,11 @@ export class History {
     await this.pool?.end?.();
   }
 
+  async ready() {
+    if (this.pool) await this.pool.query("SELECT 1");
+    return true;
+  }
+
   async createIncident(incident) {
     if (!this.pool) {
       if (this.#incidents.some((value) => value.suspectedService === incident.suspectedService && value.triggerCondition === incident.triggerCondition && value.status !== "RESOLVED")) return null;
