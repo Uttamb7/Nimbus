@@ -8,7 +8,7 @@ const services = [
   "order-orchestrator", "payment-worker", "notification-router", "analytics-ingestor",
 ];
 
-export function releaseOverride(report) {
+function requireCleanPass(report) {
   if (
     report?.decision !== "PASS"
     || !Array.isArray(report.reasons)
@@ -16,13 +16,30 @@ export function releaseOverride(report) {
     || !Array.isArray(report.cleanupErrors)
     || report.cleanupErrors.length
   ) throw new Error("Canary report must be a clean PASS");
+}
 
-  const image = validateImage(report.images?.candidate?.digest);
+export function releaseOverrideFor(image) {
+  image = validateImage(image);
   if (!image.includes("@sha256:")) throw new Error("Canary candidate must resolve to a digest");
   return [
     "x-release: &release", `  image: ${image}`, "services:",
     ...services.map((service) => `  ${service}: *release`), "",
   ].join("\n");
+}
+
+export function verifiedImages(report) {
+  requireCleanPass(report);
+  const stable = validateImage(report.images?.stable?.digest);
+  const candidate = validateImage(report.images?.candidate?.digest);
+  if (![stable, candidate].every((image) => image.includes("@sha256:"))) {
+    throw new Error("Canary images must resolve to digests");
+  }
+  return { stable, candidate };
+}
+
+export function releaseOverride(report) {
+  requireCleanPass(report);
+  return releaseOverrideFor(report.images?.candidate?.digest);
 }
 
 export function run(path) {

@@ -63,11 +63,23 @@ services:
   analytics-ingestor: *release
 ```
 
-Then run `docker compose -f compose.yaml -f release.override.yaml up -d --no-build --wait`
-against an already built local stack.
-Retain the old digest for manual rollback using the same command. The regular
-pipeline's `latest` tag is a build-delivery pointer, not a canary promotion record.
+For a journaled local update with automatic restoration when the Compose health wait
+fails, run:
+
+```bash
+node scripts/deploy.js canary-results/report.json deployment.json
+```
+
+The command applies only the report's immutable candidate digest to the eight runtime
+services with `--no-build --wait`. It records timestamped deployment transitions in
+`deployment.json`; if the candidate update fails, it applies the report's immutable
+stable digest and finishes `ROLLED_BACK`, or `FAILED` when that restoration also fails.
+The journal is retained and temporary overrides are removed. This command operates on
+the current local Compose project; it does not retag images or change infrastructure
+services. The regular pipeline's `latest` tag is a build-delivery pointer, not a
+canary promotion record.
 
 Nimbus does not deploy to AWS or production. This workflow is isolated image
-verification; percentage-based live traffic rollout and automatic rollback remain
-future deployment-controller work.
+verification and the deployment command updates one local stack atomically rather
+than routing live traffic by percentage. Progressive 10/25/50/100 traffic shifting
+and metric-triggered rollback during those stages remain future controller work.
