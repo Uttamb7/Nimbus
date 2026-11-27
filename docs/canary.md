@@ -40,8 +40,14 @@ with a second always-run cleanup step. Hosted runner disposal covers abrupt runn
 termination; it may prevent complete artifact collection.
 
 A PASS is evidence for a human release decision. It never retags or promotes an
-image. To choose a verified image locally, create `release.override.yaml`, replacing
-`<digest>` with the candidate digest from the report:
+image. To render an override from a downloaded passing report, run:
+
+```bash
+node scripts/release.js canary-results/report.json > release.override.yaml
+```
+
+The selector fails without output unless the report is a clean PASS and its
+candidate resolved to an immutable Nimbus digest. It emits this shape:
 
 ```yaml
 x-release: &release
